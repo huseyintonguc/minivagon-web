@@ -34,6 +34,16 @@ def get_sheet():
     client = get_client()
     return client.open(SHEET_ADI)
 
+# --- GÜVENLİ SAYI DÖNÜŞTÜRME (HATA ÖNLEYİCİ) ---
+def safe_int(val):
+    """Excel'den gelen boş veya hatalı veriyi 0'a çevirir."""
+    try:
+        if pd.isna(val) or str(val).strip() == "":
+            return 0
+        return int(float(str(val).replace(",", ".")))
+    except:
+        return 0
+
 # --- YARDIMCI FONKSİYONLAR ---
 def verileri_getir(sayfa_adi):
     sh = get_sheet()
@@ -62,7 +72,6 @@ def yeni_urun_resim_ekle(ad, resim_adi):
 
 # --- ÜRÜN RESİMLERİNİ GETİR ---
 def get_urun_resimleri():
-    # Sabit Liste (Yedek)
     sabitler = {
         "6 LI KADEHLİK": "6likadehlik.jpg", "2 LI KALPLİ KADEHLİK": "2likalplikadehlik.jpg",
         "3 LÜ KADEHLİK": "3lukadehlik.jpg", "İKİLİ STAND": "ikilistand.jpg",
@@ -74,17 +83,15 @@ def get_urun_resimleri():
         "SİNEK AS": "sinekas.jpg", "YANIK NARGİLE SEHPA": "yaniknargilesehpa.jpg",
         "AÇIK RENK NARGİLE SEHPA": "acikrenknargilesehpa.jpg", "SİYAH TEKLİ STAND": "syhteklistand.jpg"
     }
-    # Google Sheet'ten eklenenleri de al
     db_urunler = verileri_getir("Urunler")
     for u in db_urunler:
-        # Hata önleyici kontrol
         if isinstance(u, dict) and "Urun Adi" in u and "Resim Dosya Adi" in u:
             sabitler[u["Urun Adi"]] = u["Resim Dosya Adi"]
     return sabitler
 
 GUNCEL_URUNLER = get_urun_resimleri()
 
-# --- MALİYET KAYDETME (DÜZELTİLMİŞ) ---
+# --- MALİYET KAYDETME ---
 def maliyet_kaydet(veriler):
     sh = get_sheet()
     try: w = sh.worksheet("Maliyetler")
@@ -103,20 +110,17 @@ def maliyet_kaydet(veriler):
     ]
 
     try:
-        # Varsa Güncelle, Yoksa Ekle
-        # Sütun adı kontrolü yapalım (Bazen boşluklu gelebiliyor)
         col_name = "Ürün Id"
         if col_name not in df.columns:
-            # Alternatif isimleri dene
             if "Urun Id" in df.columns: col_name = "Urun Id"
             elif "Ürün ID" in df.columns: col_name = "Ürün ID"
-            else: return "HATA: Excel'de 'Ürün Id' sütunu bulunamadı. Başlıkları kontrol edin."
+            else: return "HATA: Excel'de 'Ürün Id' sütunu bulunamadı."
 
+        # Stringe çevirip karşılaştırıyoruz
         row_idx = df.index[df[col_name].astype(str) == str(veriler["Ürün Id"])].tolist()
         
         if row_idx:
             gspread_row = row_idx[0] + 2 
-            # A'dan N'ye güncelle
             w.update(f"A{gspread_row}:N{gspread_row}", [yeni_satir])
             return "GÜNCELLENDİ"
         
@@ -131,14 +135,12 @@ def create_pdf(s, urun_dict):
     try: pdf.add_font('ArialTR', '', 'arial.ttf', uni=True); pdf.set_font('ArialTR', '', 12)
     except: pdf.set_font("Arial", size=12)
 
-    # Başlık
     pdf.set_fill_color(40, 40, 40); pdf.rect(0, 0, 210, 30, 'F')
     pdf.set_text_color(255, 255, 255); pdf.set_font_size(20); pdf.text(10, 20, "MINIVAGON")
     pdf.set_font_size(10); pdf.set_text_color(200, 200, 200)
     pdf.text(150, 15, f"Siparis No: #{s.get('Siparis No')}")
     pdf.text(150, 22, f"Tarih: {s.get('Tarih')}")
 
-    # Resim
     def resim_koy(u_adi, x_pos):
         if u_adi in urun_dict:
             dosya_adi = urun_dict[u_adi]
@@ -153,7 +155,6 @@ def create_pdf(s, urun_dict):
     if s.get('Ürün 2'): resim_koy(s.get('Ürün 1'), 15); resim_koy(s.get('Ürün 2'), 110)
     else: resim_koy(s.get('Ürün 1'), 65)
 
-    # İçerik
     pdf.set_y(110); pdf.set_text_color(0, 0, 0); pdf.set_font_size(12)
     def tr(t): return str(t).replace("ğ","g").replace("Ğ","G").replace("ş","s").replace("Ş","S").replace("İ","I").replace("ı","i").encode('latin-1','replace').decode('latin-1') if t else ""
 
@@ -268,10 +269,7 @@ elif menu == "📊 Raporlar":
             df['Tarih_dt'] = pd.to_datetime(df['Tarih'], format="%d.%m.%Y %H:%M", errors='coerce')
             df['Tarih_gun'] = df['Tarih_dt'].dt.date
             def temizle_tutar(val):
-                try:
-                    val = str(val).replace('TL', '').replace(' ', '')
-                    if "," in val: val = val.replace('.', '').replace(',', '.') 
-                    return float(val)
+                try: return float(str(val).replace('TL', '').replace(' ', '').replace('.', '').replace(',', '.')) if val else 0
                 except: return 0.0
             df['Tutar_float'] = df['Tutar'].apply(temizle_tutar)
 
@@ -402,17 +400,17 @@ elif menu == "📉 Maliyet Yönetimi":
             with c1:
                 u_id = st.text_input("Ürün Adı (ID)", value=vals.get("Ürün Id", ""))
                 u_kod = st.text_input("Ürün Kodu", value=vals.get("Ürün Kod", ""))
-                tahta = st.number_input("Tahta", value=int(vals.get("Tahta", 0)))
-                vernik = st.number_input("Vernik", value=int(vals.get("VERNİK", 0)))
-                yakma = st.number_input("Yakma", value=int(vals.get("YAKMA", 0)))
-                boya = st.number_input("Boya", value=int(vals.get("BOYA", 0)))
+                tahta = st.number_input("Tahta", value=safe_int(vals.get("Tahta")))
+                vernik = st.number_input("Vernik", value=safe_int(vals.get("VERNİK")))
+                yakma = st.number_input("Yakma", value=safe_int(vals.get("YAKMA")))
+                boya = st.number_input("Boya", value=safe_int(vals.get("BOYA")))
             with c2:
-                musluk = st.number_input("Musluk", value=int(vals.get("MUSLUK", 0)))
-                boru = st.number_input("Boru", value=int(vals.get("BORU", 0)))
-                halat = st.number_input("Halat", value=int(vals.get("HALAT", 0)))
-                metal = st.number_input("Metal Çubuk", value=int(vals.get("Metal çubuk", 0)))
-                cam = st.number_input("Cam", value=int(vals.get("CAM", 0)))
-                ugur = st.number_input("Uğur Kar", value=int(vals.get("UĞUR KAR", 0)))
+                musluk = st.number_input("Musluk", value=safe_int(vals.get("MUSLUK")))
+                boru = st.number_input("Boru", value=safe_int(vals.get("BORU")))
+                halat = st.number_input("Halat", value=safe_int(vals.get("HALAT")))
+                metal = st.number_input("Metal Çubuk", value=safe_int(vals.get("Metal çubuk")))
+                cam = st.number_input("Cam", value=safe_int(vals.get("CAM")))
+                ugur = st.number_input("Uğur Kar", value=safe_int(vals.get("UĞUR KAR")))
             
             toplam = tahta+vernik+yakma+boya+musluk+boru+halat+metal+cam+ugur
             st.info(f"Hesaplanan: {toplam} TL")
