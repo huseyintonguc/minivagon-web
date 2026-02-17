@@ -334,10 +334,16 @@ elif menu == "🧾 Alış ve Tedarik":
     
     # Cari Hesaplarını Çek
     cariler_data = verileri_getir("Cariler")
-    df_cariler = pd.DataFrame(cariler_data)
-    cari_listesi = df_cariler["Cari Adı"].unique().tolist() if not df_cariler.empty and "Cari Adı" in df_cariler.columns else []
     
-    # Siparişleri Çek (Bağlantı için)
+    # Cari listesini hazırla
+    cari_listesi = []
+    df_cariler = pd.DataFrame()
+    if cariler_data:
+        df_cariler = pd.DataFrame(cariler_data)
+        if "Cari Adı" in df_cariler.columns:
+            cari_listesi = df_cariler["Cari Adı"].unique().tolist()
+    
+    # Siparişleri Çek
     siparis_data = verileri_getir("Siparisler")
     df_siparis = pd.DataFrame(siparis_data)
     siparis_listesi = []
@@ -357,7 +363,7 @@ elif menu == "🧾 Alış ve Tedarik":
             if cari_listesi:
                 secilen_cari = c1.selectbox("Tedarikçi (Cari Hesap)", cari_listesi)
             else:
-                secilen_cari = c1.text_input("Tedarikçi Adı (Yeni)")
+                secilen_cari = c1.text_input("Tedarikçi Adı (Yeni Oluşturulacak)")
                 
             urun_sec = c2.selectbox("Ürün", list(GUNCEL_URUNLER.keys()) + ["Diğer"])
             if urun_sec == "Diğer": urun_final = c2.text_input("Ürün Adı Manuel")
@@ -381,6 +387,7 @@ elif menu == "🧾 Alış ve Tedarik":
                     satir = [tarih, col_sip, secilen_cari, urun_final, adet, birim_fiyat, toplam, "BEKLİYOR", notlar]
                     alis_faturasi_ekle(satir)
                     st.success("✅ Alış talimatı sisteme girildi!")
+                    st.cache_resource.clear()
                 else: st.warning("Tedarikçi ve Ürün seçiniz.")
 
     with tab2:
@@ -390,15 +397,14 @@ elif menu == "🧾 Alış ve Tedarik":
             if alis_data:
                 df_alis = pd.DataFrame(alis_data)
                 
-                # Sütun kontrolü (Eski formatta kalmasın)
+                # Sütun kontrolü
                 if "Bağlı Sipariş" not in df_alis.columns:
-                    st.warning("⚠️ Google Sheets 'Alislar' sayfasında 'Bağlı Sipariş' sütunu eksik olabilir. Lütfen güncelleyin.")
+                    st.warning("⚠️ Google Sheets 'Alislar' sayfasında 'Bağlı Sipariş' sütunu eksik. Lütfen ekleyin.")
                 else:
                     st.markdown("### 🔴 Faturası Gelmeyenler (Stok Bekleyen)")
                     bekleyenler = df_alis[df_alis["Durum"] == "BEKLİYOR"].copy()
                     
                     if not bekleyenler.empty:
-                        # Filtre
                         unique_orders = bekleyenler["Bağlı Sipariş"].unique()
                         secili_filtre = st.multiselect("Siparişe Göre Filtrele:", unique_orders)
                         if secili_filtre: bekleyenler = bekleyenler[bekleyenler["Bağlı Sipariş"].isin(secili_filtre)]
@@ -508,32 +514,59 @@ elif menu == "📊 Raporlar":
 # 6. CARİ HESAPLAR
 elif menu == "💰 Cari Hesaplar":
     st.header("Cari Takip")
-    try:
-        data = verileri_getir("Cariler")
-        c1, c2 = st.columns([1,2])
-        with c1:
-            st.subheader("İşlem Ekle")
-            with st.form("cari"):
-                ad = st.text_input("Cari Adı")
-                tip = st.selectbox("İşlem", ["FATURA (Borç)", "ÖDEME (Alacak)"])
-                desc = st.text_input("Açıklama")
-                tutar = st.number_input("Tutar", min_value=0.0, format="%.2f")
-                if st.form_submit_button("KAYDET"):
+    
+    # Yeni Ekleme Bölümü
+    with st.expander("➕ Yeni Cari Hesap / İşlem Ekle", expanded=True):
+        with st.form("cari"):
+            c1, c2 = st.columns(2)
+            # Mevcut carileri listele veya yeni gir
+            mevcut_data = verileri_getir("Cariler")
+            mevcut_cariler = []
+            if mevcut_data:
+                df_temp = pd.DataFrame(mevcut_data)
+                if "Cari Adı" in df_temp.columns:
+                    mevcut_cariler = df_temp["Cari Adı"].unique().tolist()
+            
+            # Combobox mantığı (Seç veya Yaz)
+            cari_secim = c1.selectbox("Cari Hesap Seç:", ["Yeni Ekle..."] + mevcut_cariler)
+            if cari_secim == "Yeni Ekle...":
+                ad = c1.text_input("Yeni Cari Adı Giriniz:")
+            else:
+                ad = cari_secim
+                
+            tip = c2.selectbox("İşlem", ["FATURA (Borç)", "ÖDEME (Alacak)"])
+            desc = st.text_input("Açıklama")
+            tutar = st.number_input("Tutar", min_value=0.0, format="%.2f")
+            
+            if st.form_submit_button("KAYDET"):
+                if ad:
                     cari_islem_ekle([ad, simdi().strftime("%d.%m.%Y"), tip, desc, tutar])
                     st.success("Kaydedildi!")
+                    st.cache_resource.clear()
                     st.rerun()
-        with c2:
-            if data:
-                df = pd.DataFrame(data)
-                if 'Cari Adı' in df.columns:
-                    secili = st.selectbox("Hesap:", df['Cari Adı'].unique())
-                    if secili:
-                        sub = df[df['Cari Adı'] == secili]
-                        st.table(sub)
-                        borc = sub[sub['İşlem Tipi'].astype(str).str.contains("FATURA")]['Tutar'].sum()
-                        alacak = sub[sub['İşlem Tipi'].astype(str).str.contains("ÖDEME")]['Tutar'].sum()
-                        st.metric("BAKİYE", f"{alacak - borc:,.2f} TL")
-    except: st.error("Cari verisi alınamadı.")
+                else:
+                    st.warning("Cari adı boş olamaz.")
+
+    # Listeleme Bölümü
+    if mevcut_data:
+        df = pd.DataFrame(mevcut_data)
+        if 'Cari Adı' in df.columns:
+            secili = st.selectbox("Hesap Detayı Gör:", df['Cari Adı'].unique())
+            if secili:
+                sub = df[df['Cari Adı'] == secili]
+                st.table(sub)
+                
+                # Bakiye Hesapla
+                borc = sub[sub['İşlem Tipi'].astype(str).str.contains("FATURA")]['Tutar'].sum()
+                alacak = sub[sub['İşlem Tipi'].astype(str).str.contains("ÖDEME")]['Tutar'].sum()
+                bakiye = alacak - borc
+                
+                k1, k2, k3 = st.columns(3)
+                k1.metric("Toplam Borç", f"{borc:,.2f} TL")
+                k2.metric("Toplam Ödeme", f"{alacak:,.2f} TL")
+                k3.metric("GÜNCEL BAKİYE", f"{bakiye:,.2f} TL", delta_color="normal")
+        else: st.warning("Sütun başlıkları eksik.")
+    else: st.info("Henüz cari kayıt yok.")
 
 # 7. MALİYET YÖNETİMİ
 elif menu == "📉 Maliyet Yönetimi":
@@ -564,4 +597,53 @@ elif menu == "📉 Maliyet Yönetimi":
         st.subheader("Maliyet Kartı")
         mod = st.radio("İşlem:", ["Güncelle", "Yeni Ekle"], horizontal=True)
         vals = {}
-        if mod == "Güncelle" and not df_m.empty and "Ürün Id" in
+        if mod == "Güncelle" and not df_m.empty and "Ürün Id" in df_m.columns:
+            s_id = st.selectbox("Ürün Seç:", df_m["Ürün Id"].unique())
+            if s_id: vals = df_m[df_m["Ürün Id"] == s_id].iloc[0].to_dict()
+        
+        with st.form("maliyet_form"):
+            c1, c2 = st.columns(2)
+            with c1:
+                u_id = st.text_input("Ürün Adı (ID)", value=vals.get("Ürün Id", ""))
+                u_kod = st.text_input("Ürün Kodu", value=vals.get("Ürün Kod", ""))
+                tahta = st.number_input("Tahta", value=safe_int(vals.get("Tahta")))
+                vernik = st.number_input("Vernik", value=safe_int(vals.get("VERNİK")))
+                yakma = st.number_input("Yakma", value=safe_int(vals.get("YAKMA")))
+                boya = st.number_input("Boya", value=safe_int(vals.get("BOYA")))
+            with c2:
+                musluk = st.number_input("Musluk", value=safe_int(vals.get("MUSLUK")))
+                boru = st.number_input("Boru", value=safe_int(vals.get("BORU")))
+                halat = st.number_input("Halat", value=safe_int(vals.get("HALAT")))
+                metal = st.number_input("Metal Çubuk", value=safe_int(vals.get("Metal çubuk")))
+                cam = st.number_input("Cam", value=safe_int(vals.get("CAM")))
+                ugur = st.number_input("Uğur Kar", value=safe_int(vals.get("UĞUR KAR")))
+            
+            toplam = tahta+vernik+yakma+boya+musluk+boru+halat+metal+cam+ugur
+            st.info(f"Hesaplanan: {toplam} TL")
+            
+            if st.form_submit_button("KAYDET"):
+                veri = {
+                    "Ürün Id": u_id, "Ürün Kod": u_kod, "Görsel": GUNCEL_URUNLER.get(u_id, ""),
+                    "Tahta": tahta, "VERNİK": vernik, "YAKMA": yakma, "BOYA": boya,
+                    "MUSLUK": musluk, "BORU": boru, "HALAT": halat, "Metal çubuk": metal,
+                    "CAM": cam, "UĞUR KAR": ugur, "MALİYET": toplam
+                }
+                res = maliyet_kaydet(veri)
+                if "HATA" in res: st.error(res)
+                else: 
+                    st.success(res)
+                    st.cache_resource.clear()
+
+# 8. ÜRÜN YÖNETİMİ
+elif menu == "➕ Ürün Yönetimi":
+    st.header("Yeni Ürün Tanımla")
+    with st.form("yeni_urun"):
+        ad = st.text_input("Ürün Adı")
+        resim = st.file_uploader("Resim", type=['jpg','png','jpeg'])
+        if st.form_submit_button("EKLE"):
+            if ad and resim:
+                dosya = f"{ad.replace(' ','_')}.jpg"
+                img = Image.open(resim).convert('RGB'); img.save(os.path.join(RESIM_KLASORU, dosya))
+                yeni_urun_resim_ekle(ad, dosya)
+                st.success("Eklendi!")
+            else: st.warning("Eksik bilgi.")
