@@ -2,13 +2,13 @@ import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import pytz
 from fpdf import FPDF
 from PIL import Image
 import os
 import tempfile
-import plotly.express as px  # Grafik kütüphanesi
+import plotly.express as px
 
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="MiniVagon Bulut", page_icon="☁️", layout="wide")
@@ -130,9 +130,7 @@ menu = st.sidebar.radio("Menü", ["📦 Sipariş Girişi", "📋 Sipariş Listes
 # -----------------------------------------------------------------------------
 if menu == "📦 Sipariş Girişi":
     st.header("Yeni Sipariş Ekle")
-    
     col1, col2 = st.columns([1, 2])
-    
     with col1:
         st.info("🛒 Ürün Bilgileri")
         u1 = st.selectbox("1. Ürün Seçimi", list(URUNLER.keys()))
@@ -140,7 +138,6 @@ if menu == "📦 Sipariş Girişi":
             img_path1 = os.path.join(RESIM_KLASORU, URUNLER[u1])
             if os.path.exists(img_path1):
                 st.image(img_path1, width=250, caption=u1)
-        
         a1 = st.number_input("1. Ürün Adet", 1, 100, 1)
         i1 = st.text_input("1. Ürün Özel İsim (Varsa)")
         
@@ -162,11 +159,9 @@ if menu == "📦 Sipariş Girişi":
             k1, k2 = st.columns(2)
             tutar = k1.text_input("Tutar (TL)")
             odeme = k2.selectbox("Ödeme", ["KAPIDA NAKİT", "KAPIDA K.KARTI", "HAVALE/EFT", "WEB SİTESİ"])
-            
             k3, k4 = st.columns(2)
             kaynak = k3.selectbox("Kaynak", ["Instagram", "Web Sitesi", "Trendyol", "Whatsapp"])
             durum = k4.selectbox("Durum", ["YENİ SİPARİŞ", "HAZIRLANIYOR", "KARGOLANDI", "TESLİM EDİLDİ"])
-            
             st.markdown("---")
             ad = st.text_input("Ad Soyad")
             tel = st.text_input("Telefon")
@@ -175,7 +170,6 @@ if menu == "📦 Sipariş Girişi":
             adres = st.text_area("Adres", height=100)
             notlar = st.text_input("Sipariş Notu")
             fatura_kesildi = st.checkbox("Faturası Kesildi")
-            
             submitted = st.form_submit_button("SİPARİŞİ KAYDET", type="primary")
             
             if submitted:
@@ -187,11 +181,9 @@ if menu == "📦 Sipariş Girişi":
                         if not df_m.empty and 'Siparis No' in df_m.columns:
                             try: yeni_no = int(pd.to_numeric(df_m['Siparis No'], errors='coerce').max()) + 1
                             except: pass
-                    
                     tarih = simdi().strftime("%d.%m.%Y %H:%M")
                     fatura_durum = "KESİLDİ" if fatura_kesildi else "KESİLMEDİ"
                     satir = [yeni_no, tarih, durum, ad, tel, tc, mail, u1, a1, i1, u2, a2, i2, tutar, odeme, kaynak, adres, notlar, fatura_durum]
-                    
                     siparis_ekle(satir)
                     st.success(f"✅ Sipariş #{yeni_no} Başarıyla Kaydedildi!")
                 except Exception as e:
@@ -206,8 +198,6 @@ elif menu == "📋 Sipariş Listesi":
         data = verileri_getir("Siparisler")
         if data:
             df = pd.DataFrame(data)
-            
-            # Sıralama
             if 'Siparis No' in df.columns:
                 df['Siparis No'] = pd.to_numeric(df['Siparis No'], errors='coerce')
                 df = df.sort_values(by="Siparis No", ascending=False)
@@ -220,11 +210,9 @@ elif menu == "📋 Sipariş Listesi":
             st.dataframe(df, use_container_width=True, hide_index=True)
             
             st.divider()
-            # PDF (Otomatik en üstteki seçili)
             if 'Siparis No' in df.columns and not df.empty:
                 secenekler = df.apply(lambda x: f"{int(x['Siparis No'])} - {x['Müşteri']}", axis=1)
                 secilen = st.selectbox("Fiş Yazdır:", secenekler)
-                
                 if st.button("📄 FİŞ OLUŞTUR"):
                     s_no = int(secilen.split(" - ")[0])
                     sip = df[df['Siparis No'] == s_no].iloc[0].to_dict()
@@ -236,111 +224,168 @@ elif menu == "📋 Sipariş Listesi":
         st.error(f"Veri çekilemedi: {e}")
 
 # -----------------------------------------------------------------------------
-# 3. RAPORLAR (YENİ EKLENDİ)
+# 3. RAPORLAR (GÜNCELLENDİ: DETAYLI FİLTRELEME)
 # -----------------------------------------------------------------------------
 elif menu == "📊 Raporlar":
-    st.header("Detaylı Satış Raporları")
+    st.header("Detaylı Satış Analizi")
     try:
         raw_data = verileri_getir("Siparisler")
         if raw_data:
             df = pd.DataFrame(raw_data)
             
-            # --- VERİ HAZIRLIĞI ---
-            # Tarih formatını düzeltme (String -> Datetime)
+            # --- 1. VERİ TEMİZLİĞİ VE HAZIRLIK ---
+            # Tarih formatı (Gün.Ay.Yıl Saat:Dakika) -> Datetime
             df['Tarih_dt'] = pd.to_datetime(df['Tarih'], format="%d.%m.%Y %H:%M", errors='coerce')
-            
-            # Tutar formatını düzeltme (String "1.250,50" -> Float 1250.50)
-            # Not: Kullanıcı girişi nasılsa ona göre temizlik
+            df['Tarih_gun'] = df['Tarih_dt'].dt.date  # Sadece gün (filtreleme için)
+
+            # Tutar formatı ("1.250,50 TL" -> Float 1250.50)
             def temizle_tutar(val):
                 try:
                     val = str(val).replace('TL', '').replace(' ', '')
-                    if "," in val: # Türkçe format (1.200,50)
+                    if "," in val: # Türkçe format
                         val = val.replace('.', '').replace(',', '.') 
                     return float(val)
-                except:
-                    return 0.0
-            
+                except: return 0.0
             df['Tutar_float'] = df['Tutar'].apply(temizle_tutar)
-            
-            # --- FİLTRE ALANI ---
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                st.subheader("Filtrele")
-                # Ürün Filtresi
-                tum_urunler = list(URUNLER.keys())
-                secilen_urunler = st.multiselect("Ürün Bazlı Rapor Al:", tum_urunler)
-                
-                # Eğer ürün seçildiyse veriyi daralt
-                if secilen_urunler:
-                    # Hem Ürün 1 hem Ürün 2'de arama yap
-                    mask = df['Ürün 1'].isin(secilen_urunler) | df['Ürün 2'].isin(secilen_urunler)
-                    df = df[mask]
-            
-            with col_f2:
-                # Zaman Aralığı Görünümü
-                zaman_modu = st.radio("Grafik Görünümü:", ["Günlük", "Aylık", "Yıllık"], horizontal=True)
-            
-            # --- KPI KARTLARI ---
-            st.divider()
-            toplam_ciro = df['Tutar_float'].sum()
-            toplam_siparis = len(df)
-            ortalama_sepet = toplam_ciro / toplam_siparis if toplam_siparis > 0 else 0
-            
-            k1, k2, k3 = st.columns(3)
-            k1.metric("Toplam Ciro", f"{toplam_ciro:,.2f} TL")
-            k2.metric("Toplam Sipariş", f"{toplam_siparis} Adet")
-            k3.metric("Ortalama Sepet", f"{ortalama_sepet:,.2f} TL")
-            
-            st.divider()
-            
-            # --- GRAFİK 1: ZAMAN ÇİZELGESİ ---
-            st.subheader(f"Zaman İçindeki Satış Trendi ({zaman_modu})")
-            
-            if not df.empty:
-                df_chart = df.copy()
-                df_chart.set_index('Tarih_dt', inplace=True)
-                
-                # Resample (Yeniden Örnekleme)
-                if zaman_modu == "Günlük":
-                    df_resampled = df_chart.resample('D')['Tutar_float'].sum().reset_index()
-                elif zaman_modu == "Aylık":
-                    df_resampled = df_chart.resample('ME')['Tutar_float'].sum().reset_index() # 'M' eski sürüm, 'ME' yeni
-                else: # Yıllık
-                    df_resampled = df_chart.resample('YE')['Tutar_float'].sum().reset_index()
-                
-                fig_line = px.line(df_resampled, x='Tarih_dt', y='Tutar_float', 
-                                   labels={'Tutar_float': 'Ciro (TL)', 'Tarih_dt': 'Tarih'},
-                                   title="Satış Trendi", markers=True)
-                st.plotly_chart(fig_line, use_container_width=True)
-            
-            # --- GRAFİK 2: EN ÇOK SATAN ÜRÜNLER ---
-            st.subheader("Ürün Performansı")
-            # Hem Ürün 1 hem Ürün 2 sütunlarını sayıyoruz
-            u1_counts = df['Ürün 1'].value_counts()
-            u2_counts = df['Ürün 2'].value_counts()
-            total_counts = u1_counts.add(u2_counts, fill_value=0).sort_values(ascending=False)
-            
-            # Boş olanları (None veya boş string) temizle
-            if '' in total_counts.index:
-                total_counts = total_counts.drop('')
-            
-            col_g1, col_g2 = st.columns(2)
-            
-            with col_g1:
-                fig_bar = px.bar(total_counts, x=total_counts.values, y=total_counts.index, orientation='h',
-                                 labels={'x': 'Satış Adedi', 'y': 'Ürün'}, title="En Çok Satanlar", color=total_counts.values)
-                st.plotly_chart(fig_bar, use_container_width=True)
-            
-            with col_g2:
-                # Ödeme Tipleri Pasta Grafiği
-                fig_pie = px.pie(df, names='Ödeme', title="Ödeme Yöntemi Dağılımı")
-                st.plotly_chart(fig_pie, use_container_width=True)
 
-        else:
-            st.warning("Henüz analiz edilecek veri yok.")
+            # --- 2. FİLTRELEME ALANI ---
+            st.markdown("### 🔍 Filtreler")
+            f1, f2, f3 = st.columns([1, 1, 2])
             
+            with f1:
+                # Ürün Filtresi
+                secilen_urunler = st.multiselect("Ürün Seçiniz:", list(URUNLER.keys()), placeholder="Tüm Ürünler")
+            
+            with f2:
+                # Zaman Filtresi Seçenekleri
+                zaman_secimi = st.selectbox(
+                    "Rapor Dönemi Seçiniz:", 
+                    ["Bugün", "Dün", "Bu Ay", "Geçen Ay", "Son 7 Gün", "Son 30 Gün", "Son 1 Yıl", "Tarih Aralığı Seç"]
+                )
+
+            # Tarih Hesaplamaları
+            bugun = simdi().date()
+            baslangic_tarihi = bugun
+            bitis_tarihi = bugun
+
+            if zaman_secimi == "Bugün":
+                baslangic_tarihi = bugun
+                bitis_tarihi = bugun
+            elif zaman_secimi == "Dün":
+                baslangic_tarihi = bugun - timedelta(days=1)
+                bitis_tarihi = baslangic_tarihi
+            elif zaman_secimi == "Son 7 Gün":
+                baslangic_tarihi = bugun - timedelta(days=7)
+                bitis_tarihi = bugun
+            elif zaman_secimi == "Son 30 Gün":
+                baslangic_tarihi = bugun - timedelta(days=30)
+                bitis_tarihi = bugun
+            elif zaman_secimi == "Bu Ay":
+                baslangic_tarihi = bugun.replace(day=1)
+                bitis_tarihi = bugun
+            elif zaman_secimi == "Geçen Ay":
+                # Geçen ayın ilk gününü bulmak için bu ayın ilk gününden 1 gün çıkarıp, tekrar 1. güne git
+                bu_ay_ilk = bugun.replace(day=1)
+                gecen_ay_son = bu_ay_ilk - timedelta(days=1)
+                gecen_ay_ilk = gecen_ay_son.replace(day=1)
+                baslangic_tarihi = gecen_ay_ilk
+                bitis_tarihi = gecen_ay_son
+            elif zaman_secimi == "Son 1 Yıl":
+                baslangic_tarihi = bugun - timedelta(days=365)
+                bitis_tarihi = bugun
+            elif zaman_secimi == "Tarih Aralığı Seç":
+                with f3:
+                    d_range = st.date_input("Tarih Aralığını Giriniz:", (bugun - timedelta(days=7), bugun))
+                    if len(d_range) == 2:
+                        baslangic_tarihi, bitis_tarihi = d_range
+
+            # --- VERİYİ FİLTRELEME ---
+            # 1. Tarih Filtresi Uygula
+            df_filtered = df[
+                (df['Tarih_gun'] >= baslangic_tarihi) & 
+                (df['Tarih_gun'] <= bitis_tarihi)
+            ]
+
+            # 2. Ürün Filtresi Uygula (Eğer seçildiyse)
+            if secilen_urunler:
+                df_filtered = df_filtered[
+                    df_filtered['Ürün 1'].isin(secilen_urunler) | 
+                    df_filtered['Ürün 2'].isin(secilen_urunler)
+                ]
+
+            # --- 3. RAPOR SONUÇLARI ---
+            st.divider()
+            if not df_filtered.empty:
+                st.subheader(f"📅 Rapor: {baslangic_tarihi.strftime('%d.%m.%Y')} - {bitis_tarihi.strftime('%d.%m.%Y')}")
+                
+                # KPI Kartları
+                toplam_ciro = df_filtered['Tutar_float'].sum()
+                toplam_siparis = len(df_filtered)
+                # Ürün sayısı (Ürün 1 + Ürün 2)
+                toplam_urun_adedi = pd.to_numeric(df_filtered['Adet 1'], errors='coerce').sum() + \
+                                    pd.to_numeric(df_filtered['Adet 2'], errors='coerce').fillna(0).sum()
+
+                k1, k2, k3 = st.columns(3)
+                k1.metric("Toplam Ciro", f"{toplam_ciro:,.2f} TL")
+                k2.metric("Toplam Sipariş", f"{toplam_siparis} Adet")
+                k3.metric("Satılan Ürün Adedi", f"{int(toplam_urun_adedi)} Adet")
+
+                # --- GRAFİKLER ---
+                g1, g2 = st.columns(2)
+                
+                with g1:
+                    # 1. En Çok Satan Ürünler (Bar)
+                    st.markdown("##### 🏆 En Çok Satan Ürünler")
+                    u1_c = df_filtered['Ürün 1'].value_counts()
+                    u2_c = df_filtered['Ürün 2'].value_counts()
+                    total_counts = u1_c.add(u2_c, fill_value=0).sort_values(ascending=True) # Bar chart için tersten
+                    # Boşları temizle
+                    if '' in total_counts.index: total_counts = total_counts.drop('')
+                    
+                    fig_bar = px.bar(
+                        x=total_counts.values, 
+                        y=total_counts.index, 
+                        orientation='h',
+                        labels={'x': 'Adet', 'y': 'Ürün'},
+                        text_auto=True
+                    )
+                    fig_bar.update_layout(showlegend=False)
+                    st.plotly_chart(fig_bar, use_container_width=True)
+
+                with g2:
+                    # 2. Zaman İçindeki Satış (Çizgi)
+                    st.markdown("##### 📈 Zaman İçindeki Ciro Trendi")
+                    
+                    # Veriyi grupla (Günlük veya Aylık)
+                    df_chart = df_filtered.copy()
+                    
+                    # Türkçe Ay İsimleri İçin Mapping
+                    aylar_tr = {1:'Ocak', 2:'Şubat', 3:'Mart', 4:'Nisan', 5:'Mayıs', 6:'Haziran', 
+                                7:'Temmuz', 8:'Ağustos', 9:'Eylül', 10:'Ekim', 11:'Kasım', 12:'Aralık'}
+                    
+                    if (bitis_tarihi - baslangic_tarihi).days > 31:
+                        # Aylık Gösterim (Uzun periyotlar için)
+                        df_chart['Ay_No'] = df_chart['Tarih_dt'].dt.month
+                        df_chart['Yıl'] = df_chart['Tarih_dt'].dt.year
+                        df_chart['Dönem'] = df_chart['Ay_No'].map(aylar_tr) + " " + df_chart['Yıl'].astype(str)
+                        # Sıralama düzgün olsun diye
+                        df_grouped = df_chart.groupby(['Yıl', 'Ay_No', 'Dönem'])['Tutar_float'].sum().reset_index()
+                        df_grouped = df_grouped.sort_values(['Yıl', 'Ay_No'])
+                        
+                        fig_line = px.line(df_grouped, x='Dönem', y='Tutar_float', markers=True, labels={'Tutar_float': 'Ciro (TL)'})
+                    else:
+                        # Günlük Gösterim
+                        df_grouped = df_chart.groupby('Tarih_gun')['Tutar_float'].sum().reset_index()
+                        fig_line = px.line(df_grouped, x='Tarih_gun', y='Tutar_float', markers=True, labels={'Tutar_float': 'Ciro (TL)', 'Tarih_gun': 'Tarih'})
+                    
+                    st.plotly_chart(fig_line, use_container_width=True)
+
+            else:
+                st.warning("⚠️ Seçilen kriterlere uygun kayıt bulunamadı.")
+        else:
+            st.info("Henüz veri girişi yapılmamış.")
     except Exception as e:
-        st.error(f"Rapor oluşturulurken hata: {e}")
+        st.error(f"Rapor hatası: {e}")
 
 # -----------------------------------------------------------------------------
 # 4. CARİ HESAPLAR
