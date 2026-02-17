@@ -34,37 +34,30 @@ def get_sheet():
     client = get_client()
     return client.open(SHEET_ADI)
 
-# --- AKILLI PARA VE SAYI ÇEVİRİCİ ---
+# --- GÜVENLİ SAYI DÖNÜŞTÜRME (ULTRA GÜVENLİ) ---
+def safe_int(val):
+    try:
+        if pd.isna(val) or str(val).strip() == "": return 0
+        return int(float(str(val).replace(",", ".")))
+    except: return 0
+
 def safe_float(val):
-    """Her türlü para formatını (51.805,20 veya 1250.50) float sayıya çevirir."""
+    """Excel'den gelen her türlü garip para formatını düzeltir."""
     try:
         if pd.isna(val) or str(val).strip() == "": return 0.0
+        # Eğer zaten sayıysa direkt döndür
         if isinstance(val, (int, float)): return float(val)
         
-        s = str(val).replace("TL", "").replace("tl", "").replace("₺", "").replace(" ", "").strip()
+        # Metin temizliği
+        val_str = str(val).replace("TL", "").replace("tl", "").strip()
         
-        if "." in s and "," in s:
-            if s.rfind(",") > s.rfind("."): # 1.250,50 (TR)
-                s = s.replace(".", "").replace(",", ".")
-            else: # 1,250.50 (EN)
-                s = s.replace(",", "")
-        elif "," in s: # 1250,50
-            s = s.replace(",", ".")
-            
-        return float(s)
-    except:
-        return 0.0
-
-def safe_int(val):
-    return int(safe_float(val))
-
-def format_excel_tl(val):
-    """Sayıyı Excel'in ve sizin istediğiniz 51.805,20 metin formatına çevirir."""
-    try:
-        s = "{:,.2f}".format(float(val))
-        return s.replace(",", "X").replace(".", ",").replace("X", ".")
-    except:
-        return "0,00"
+        # Türkçe format (1.250,50) mı yoksa Düz format (1250.50) mı?
+        if "," in val_str:
+            # Noktaları sil (binlik ayırıcı), Virgülü noktaya çevir (kuruş)
+            val_str = val_str.replace(".", "").replace(",", ".")
+        
+        return float(val_str)
+    except: return 0.0
 
 # --- VERİ İŞLEMLERİ (CACHING) ---
 @st.cache_data(ttl=5)
@@ -73,32 +66,66 @@ def verileri_getir(sayfa_adi):
     try:
         w = sh.worksheet(sayfa_adi)
         return w.get_all_records()
-    except:
+    except gspread.exceptions.WorksheetNotFound:
+        return []
+    except Exception as e:
         return []
 
 def cache_temizle():
     st.cache_data.clear()
 
-# --- SİSTEM KAYIT FONKSİYONLARI ---
 def siparis_ekle(satir):
     sh = get_sheet()
-    ws = sh.worksheet("Siparisler")
-    ws.append_row(satir)
+    try: w = sh.worksheet("Siparisler")
+    except:
+        w = sh.add_worksheet(title="Siparisler", rows=100, cols=20)
+        w.append_row(["Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Not","Fatura Durumu","Tedarik Durumu"])
+    w.append_row(satir)
     cache_temizle()
 
 def cari_islem_ekle(satir):
+    # satir formatı: [Cari Adı, Tarih, Fatura No, Not, Tutar, Tip]
     sh = get_sheet()
-    ws = sh.worksheet("Cariler")
-    ws.append_row(satir)
+    try: w = sh.worksheet("Cariler")
+    except:
+        w = sh.add_worksheet(title="Cariler", rows=100, cols=6)
+        w.append_row(["Cari Adı", "Tarih", "Fatura No", "Not", "Tutar", "Tip"])
+    w.append_row(satir)
+    cache_temizle()
+
+def alis_faturasi_ekle(satir):
+    sh = get_sheet()
+    try: w = sh.worksheet("Alislar")
+    except:
+        w = sh.add_worksheet(title="Alislar", rows=100, cols=9)
+        w.append_row(["Tarih", "Bağlı Sipariş", "Cari Hesap", "Ürün", "Adet", "Birim Fiyat", "Toplam", "Durum", "Not"])
+    w.append_row(satir)
     cache_temizle()
 
 def yeni_urun_resim_ekle(ad, resim_adi):
     sh = get_sheet()
-    ws = sh.worksheet("Urunler")
-    ws.append_row([ad, resim_adi])
+    try: w = sh.worksheet("Urunler")
+    except: 
+        w = sh.add_worksheet(title="Urunler", rows=100, cols=2)
+        w.append_row(["Urun Adi", "Resim Dosya Adi"])
+    w.append_row([ad, resim_adi])
     cache_temizle()
 
-# --- TEDARİK VE CARİ ENTEGRASYONU ---
+# --- ÖZEL FONKSİYONLAR ---
+def fatura_durumunu_kesildi_yap(siparis_nolar):
+    sh = get_sheet()
+    w = sh.worksheet("Siparisler")
+    try:
+        headers = w.row_values(1)
+        sip_no_col = headers.index("Siparis No") + 1
+        fatura_col = headers.index("Fatura Durumu") + 1
+        for sip_no in siparis_nolar:
+            cell = w.find(str(sip_no), in_column=sip_no_col)
+            if cell: w.update_cell(cell.row, fatura_col, "KESİLDİ")
+        cache_temizle()
+        return "BAŞARILI"
+    except Exception as e: return f"HATA: {e}"
+
 def tedarik_durumunu_guncelle_ve_cariye_isle(siparis_bilgileri, cari_hesap, maliyet_sozlugu):
     sh = get_sheet()
     ws_siparis = sh.worksheet("Siparisler")
@@ -108,155 +135,472 @@ def tedarik_durumunu_guncelle_ve_cariye_isle(siparis_bilgileri, cari_hesap, mali
     try:
         headers = ws_siparis.row_values(1)
         sip_no_col = headers.index("Siparis No") + 1
-        tedarik_col = headers.index("Tedarik Durumu") + 1
+        try: tedarik_col = headers.index("Tedarik Durumu") + 1
+        except: return "HATA: 'Siparisler' sayfasında 'Tedarik Durumu' sütunu yok."
 
-        toplam_net_maliyet = 0
+        toplam_maliyet = 0
         islenen_nolar = []
 
         for sip in siparis_bilgileri:
             sip_no = sip['Siparis No']
-            u1, a1 = sip.get('Ürün 1', ''), safe_int(sip.get('Adet 1', 0))
-            u2, a2 = sip.get('Ürün 2', ''), safe_int(sip.get('Adet 2', 0))
-            toplam_net_maliyet += (maliyet_sozlugu.get(u1, 0) * a1) + (maliyet_sozlugu.get(u2, 0) * a2)
+            u1 = sip.get('Ürün 1', '')
+            a1 = safe_int(sip.get('Adet 1', 0))
+            u2 = sip.get('Ürün 2', '')
+            a2 = safe_int(sip.get('Adet 2', 0))
+            
+            m1 = maliyet_sozlugu.get(u1, 0) * a1
+            m2 = maliyet_sozlugu.get(u2, 0) * a2
+            toplam_maliyet += (m1 + m2)
+            
             islenen_nolar.append(str(sip_no))
+            
             cell = ws_siparis.find(str(sip_no), in_column=sip_no_col)
             if cell: ws_siparis.update_cell(cell.row, tedarik_col, "TEDARİKÇİ KESTİ")
 
-        tutar_kdv_dahil = toplam_net_maliyet * 1.20
-        excel_tutar = format_excel_tl(tutar_kdv_dahil)
+        # KDV Dahil Maliyet
+        tutar_kdv_dahil = toplam_maliyet * 1.20
         aciklama = f"Sipariş Maliyetleri: {', '.join(islenen_nolar)}"
         
-        ws_cari.append_row([cari_hesap, tarih_str, "OTO-ALIS", aciklama, excel_tutar, "BORÇ"])
+        # [Cari Adı, Tarih, Fatura No, Not, Tutar, Tip]
+        ws_cari.append_row([cari_hesap, tarih_str, "OTO-ALIS", aciklama, tutar_kdv_dahil, "BORÇ"])
+        
         cache_temizle()
         return "BAŞARILI"
     except Exception as e: return f"HATA: {e}"
 
-# --- YARDIMCI VERİ ÇEKİCİLER ---
-def get_urun_resimleri():
-    sabitler = {"Örnek Ürün": "logo.png"}
-    db = verileri_getir("Urunler")
-    for u in db:
-        if isinstance(u, dict) and "Urun Adi" in u: sabitler[u["Urun Adi"]] = u["Resim Dosya Adi"]
-    return sabitler
+def alis_faturasi_onayla(alis_indexler):
+    sh = get_sheet()
+    try: ws_alis = sh.worksheet("Alislar")
+    except: return "Alislar sayfası yok"
+    try: ws_cari = sh.worksheet("Cariler")
+    except: 
+        ws_cari = sh.add_worksheet(title="Cariler", rows=100, cols=6)
+        ws_cari.append_row(["Cari Adı", "Tarih", "Fatura No", "Not", "Tutar", "Tip"])
+    
+    tarih_str = simdi().strftime("%d.%m.%Y")
+    try:
+        headers = ws_alis.row_values(1)
+        durum_col = headers.index("Durum") + 1
+        
+        for row_num, cari_hesap, net_tutar, aciklama in alis_indexler:
+            ws_alis.update_cell(row_num + 2, durum_col, "FATURALAŞTI")
+            net_val = safe_float(net_tutar)
+            brut_tutar = net_val * 1.20
+            # [Cari Adı, Tarih, Fatura No, Not, Tutar, Tip]
+            ws_cari.append_row([cari_hesap, tarih_str, "ALIS-FAT", aciklama, brut_tutar, "BORÇ"])
+        cache_temizle()
+        return "BAŞARILI"
+    except Exception as e: return f"HATA: {e}"
 
-def get_maliyet_dict():
-    db = verileri_getir("Maliyetler")
-    m_dict = {}
-    for m in db:
-        u_id = m.get("Ürün Id") or m.get("Urun Id")
-        cost = safe_float(m.get("MALİYET") or m.get("Maliyet"))
-        if u_id: m_dict[u_id] = cost
-    return m_dict
+def maliyet_kaydet(veriler):
+    sh = get_sheet()
+    try: w = sh.worksheet("Maliyetler")
+    except: return "Maliyetler sayfası bulunamadı."
+    tum = w.get_all_records()
+    df = pd.DataFrame(tum)
+    yeni = [veriler.get("Görsel",""), veriler.get("Ürün Kod",""), veriler.get("Ürün Id",""), veriler.get("Tahta",0), veriler.get("VERNİK",0), veriler.get("YAKMA",0), veriler.get("BOYA",0), veriler.get("MUSLUK",0), veriler.get("BORU",0), veriler.get("HALAT",0), veriler.get("Metal çubuk",0), veriler.get("CAM",0), veriler.get("UĞUR KAR",0), veriler.get("MALİYET",0)]
+    try:
+        col = "Ürün Id"
+        if col not in df.columns: 
+            if "Urun Id" in df.columns: col="Urun Id"
+            elif "Ürün ID" in df.columns: col="Ürün ID"
+            else: return "HATA: Sütun yok"
+        idx = df.index[df[col].astype(str) == str(veriler["Ürün Id"])].tolist()
+        if idx:
+            r = idx[0] + 2
+            w.update(f"A{r}:N{r}", [yeni])
+            cache_temizle()
+            return "GÜNCELLENDİ"
+        w.append_row(yeni)
+        cache_temizle()
+        return "EKLENDİ"
+    except Exception as e: return f"HATA: {e}"
+
+# --- ÜRÜNLERİ GETİR ---
+def get_urun_resimleri():
+    sabitler = {
+        "6 LI KADEHLİK": "6likadehlik.jpg", "2 LI KALPLİ KADEHLİK": "2likalplikadehlik.jpg",
+        "3 LÜ KADEHLİK": "3lukadehlik.jpg", "İKİLİ STAND": "ikilistand.jpg",
+        "ÇİFTLİ FIÇI": "ciftlifici.jpg", "TEKLİ FIÇI": "teklifici.jpg",
+        "TEKLİ STAND": "teklistand.jpg", "TEKLİ STAND RAFLI": "teklistandrafli.jpg",
+        "Viski Çerezlik": "tekliviski.jpg", "SATRANÇ": "satranc.jpg",
+        "ALTIGEN": "altigen.jpg", "MAÇA AS": "macaas.jpg",
+        "KUPA AS": "kupaas.jpg", "KARO AS": "karoas.jpg",
+        "SİNEK AS": "sinekas.jpg", "YANIK NARGİLE SEHPA": "yaniknargilesehpa.jpg",
+        "AÇIK RENK NARGİLE SEHPA": "acikrenknargilesehpa.jpg", "SİYAH TEKLİ STAND": "syhteklistand.jpg"
+    }
+    db_urunler = verileri_getir("Urunler")
+    for u in db_urunler:
+        if isinstance(u, dict) and "Urun Adi" in u and "Resim Dosya Adi" in u:
+            sabitler[u["Urun Adi"]] = u["Resim Dosya Adi"]
+    return sabitler
 
 GUNCEL_URUNLER = get_urun_resimleri()
 
-# --- MENÜ SİSTEMİ ---
-menu = st.sidebar.radio("Menü", ["📦 Sipariş Girişi", "📋 Sipariş Listesi", "🧾 Fatura Takibi", "🧾 Alış ve Tedarik", "📊 Raporlar", "💰 Cari Hesaplar", "📉 Maliyet Yönetimi", "➕ Ürün Yönetimi"])
+def get_maliyet_dict():
+    maliyetler = verileri_getir("Maliyetler")
+    m_dict = {}
+    if maliyetler:
+        for m in maliyetler:
+            u_id = m.get("Ürün Id") or m.get("Urun Id")
+            cost = safe_float(m.get("MALİYET") or m.get("Maliyet"))
+            if u_id: m_dict[u_id] = cost
+    return m_dict
+
+# --- PDF OLUŞTURMA ---
+def create_pdf(s, urun_dict):
+    pdf = FPDF()
+    pdf.add_page()
+    try: pdf.add_font('ArialTR', '', 'arial.ttf', uni=True); pdf.set_font('ArialTR', '', 12)
+    except: pdf.set_font("Arial", size=12)
+    pdf.set_fill_color(40, 40, 40); pdf.rect(0, 0, 210, 30, 'F')
+    pdf.set_text_color(255, 255, 255); pdf.set_font_size(20); pdf.text(10, 20, "MINIVAGON")
+    pdf.set_font_size(10); pdf.set_text_color(200, 200, 200)
+    pdf.text(150, 15, f"Siparis No: #{s.get('Siparis No')}")
+    pdf.text(150, 22, f"Tarih: {s.get('Tarih')}")
+    def resim_koy(u_adi, x_pos):
+        if u_adi in urun_dict:
+            dosya_adi = urun_dict[u_adi]
+            full_path = os.path.join(RESIM_KLASORU, dosya_adi)
+            if os.path.exists(full_path):
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+                        img = Image.open(full_path).convert('RGB'); img.thumbnail((300, 220)); img.save(tmp.name)
+                        pdf.image(tmp.name, x=x_pos, y=40, h=60)
+                except: pass
+    if s.get('Ürün 2'): resim_koy(s.get('Ürün 1'), 15); resim_koy(s.get('Ürün 2'), 110)
+    else: resim_koy(s.get('Ürün 1'), 65)
+    pdf.set_y(110); pdf.set_text_color(0, 0, 0); pdf.set_font_size(12)
+    def tr(t): return str(t).replace("ğ","g").replace("Ğ","G").replace("ş","s").replace("Ş","S").replace("İ","I").replace("ı","i").encode('latin-1','replace').decode('latin-1') if t else ""
+    pdf.set_fill_color(240, 240, 240); pdf.cell(0, 10, "  URUN DETAYLARI", ln=1, fill=True); pdf.ln(2)
+    ek1 = f" - Isim: {s.get('İsim 1')}" if s.get('İsim 1') else ""
+    pdf.cell(0, 8, tr(f"1) {s.get('Ürün 1')} ({s.get('Adet 1')} Adet){ek1}"), ln=1)
+    if s.get('Ürün 2'): ek2 = f" - Isim: {s.get('İsim 2')}" if s.get('İsim 2') else ""; pdf.cell(0, 8, tr(f"2) {s.get('Ürün 2')} ({s.get('Adet 2')} Adet){ek2}"), ln=1)
+    pdf.ln(5)
+    if "KAPIDA" in str(s.get('Ödeme')):
+        pdf.set_fill_color(255, 230, 100); pdf.rect(10, pdf.get_y(), 190, 25, 'F'); pdf.set_xy(12, pdf.get_y()+2)
+        pdf.cell(0, 10, tr(f"ODEME: {s.get('Ödeme')}"), ln=1); pdf.set_text_color(200, 0, 0); pdf.set_font_size(16)
+        pdf.cell(0, 10, tr(f"TAHSIL EDILECEK TUTAR: {s.get('Tutar')} TL"), ln=1); pdf.set_text_color(0, 0, 0); pdf.set_font_size(12); pdf.ln(5)
+    else: pdf.cell(0, 10, tr(f"Odeme: {s.get('Ödeme')} | Tutar: {s.get('Tutar')} TL"), ln=1); pdf.ln(5)
+    pdf.set_fill_color(240, 240, 240); pdf.cell(0, 10, "  MUSTERI BILGILERI", ln=1, fill=True); pdf.ln(2)
+    pdf.cell(0, 8, tr(f"Musteri: {s.get('Müşteri')}"), ln=1); pdf.cell(0, 8, tr(f"Telefon: {s.get('Telefon')}"), ln=1)
+    pdf.multi_cell(0, 8, tr(f"Adres: {s.get('Adres')}"))
+    if s.get('Not'): pdf.multi_cell(0, 8, tr(f"NOT: {s.get('Not')}"))
+    return pdf.output(dest='S').encode('latin-1')
+
+# --- MENÜ ---
+menu_options = ["📦 Sipariş Girişi", "📋 Sipariş Listesi", "🧾 Fatura Takibi", "🧾 Alış ve Tedarik", "📊 Raporlar", "💰 Cari Hesaplar", "📉 Maliyet Yönetimi", "➕ Ürün Yönetimi"]
+menu = st.sidebar.radio("Menü", menu_options)
 
 # 1. SİPARİŞ GİRİŞİ
 if menu == "📦 Sipariş Girişi":
     st.header("Yeni Sipariş Ekle")
     col1, col2 = st.columns([1, 2])
     with col1:
+        st.info("🛒 Ürün Bilgileri")
         u1 = st.selectbox("1. Ürün Seçimi", list(GUNCEL_URUNLER.keys()))
+        if u1 in GUNCEL_URUNLER and os.path.exists(os.path.join(RESIM_KLASORU, GUNCEL_URUNLER[u1])):
+            st.image(os.path.join(RESIM_KLASORU, GUNCEL_URUNLER[u1]), width=250)
         a1 = st.number_input("1. Ürün Adet", 1, 100, 1)
+        i1 = st.text_input("1. Ürün Özel İsim")
         st.markdown("---")
         ikinci = st.checkbox("2. Ürün Ekle (+)")
-        u2, a2 = "", ""
+        u2, a2, i2 = "", "", ""
         if ikinci:
-            u2 = st.selectbox("2. Ürün Seçimi", list(GUNCEL_URUNLER.keys()), key="u2_s")
+            u2 = st.selectbox("2. Ürün Seçimi", list(GUNCEL_URUNLER.keys()), key="u2_sel")
+            if u2 in GUNCEL_URUNLER and os.path.exists(os.path.join(RESIM_KLASORU, GUNCEL_URUNLER[u2])):
+                st.image(os.path.join(RESIM_KLASORU, GUNCEL_URUNLER[u2]), width=250)
             a2 = st.number_input("2. Ürün Adet", 1, 100, 1, key="a2_n")
+            i2 = st.text_input("2. Ürün Özel İsim", key="i2_t")
     with col2:
-        with st.form("siparis_form"):
-            t_inp = st.text_input("Sipariş Tutarı (Örn: 51.805,20)")
-            if t_inp: st.caption(f"Algılanan: {format_excel_tl(safe_float(t_inp))} TL")
-            odeme = st.selectbox("Ödeme", ["KAPIDA NAKİT", "KAPIDA K.KARTI", "HAVALE/EFT", "WEB SİTESİ"])
+        st.info("💳 Müşteri ve Finans")
+        with st.form("siparis"):
+            c1, c2 = st.columns(2)
+            tutar = c1.text_input("Tutar (TL)")
+            odeme = c2.selectbox("Ödeme", ["KAPIDA NAKİT", "KAPIDA K.KARTI", "HAVALE/EFT", "WEB SİTESİ"])
+            c3, c4 = st.columns(2)
+            kaynak = c3.selectbox("Kaynak", ["Instagram", "Web Sitesi", "Trendyol", "Whatsapp"])
+            durum = c4.selectbox("Durum", ["YENİ SİPARİŞ", "KARGOLANDI", "TESLİM EDİLDİ"])
+            st.divider()
             ad = st.text_input("Ad Soyad")
             tel = st.text_input("Telefon")
-            adres = st.text_area("Adres")
+            tc = st.text_input("TC (Opsiyonel)")
+            mail = st.text_input("Mail (Opsiyonel)")
+            adres = st.text_area("Adres", height=100)
+            notlar = st.text_input("Not")
             fatura = "KESİLDİ" if st.checkbox("Faturası Kesildi") else "KESİLMEDİ"
-            if st.form_submit_button("KAYDET"):
-                mevcut = verileri_getir("Siparisler")
-                y_no = 1000
-                if mevcut: y_no = int(pd.to_numeric(pd.DataFrame(mevcut)['Siparis No'], errors='coerce').max()) + 1
-                tutar_f = format_excel_tl(safe_float(t_inp))
-                satir = [y_no, simdi().strftime("%d.%m.%Y %H:%M"), "YENİ SİPARİŞ", ad, tel, "", "", u1, a1, "", u2, a2, "", tutar_f, odeme, "Whatsapp", adres, "", fatura, "BEKLİYOR"]
-                siparis_ekle(satir)
-                st.success("Kaydedildi!")
+            tedarik = "BEKLİYOR"
+            if st.form_submit_button("KAYDET", type="primary"):
+                try:
+                    mevcut = verileri_getir("Siparisler")
+                    yeni_no = 1000
+                    if mevcut:
+                        df_m = pd.DataFrame(mevcut)
+                        if not df_m.empty and 'Siparis No' in df_m.columns:
+                            try: yeni_no = int(pd.to_numeric(df_m['Siparis No'], errors='coerce').max()) + 1
+                            except: pass
+                    tarih = simdi().strftime("%d.%m.%Y %H:%M")
+                    satir = [yeni_no, tarih, durum, ad, tel, tc, mail, u1, a1, i1, u2, a2, i2, tutar, odeme, kaynak, adres, notlar, fatura, tedarik]
+                    siparis_ekle(satir)
+                    st.success(f"✅ Sipariş #{yeni_no} Kaydedildi!")
+                except Exception as e: st.error(f"Hata: {e}")
+
+# 2. SİPARİŞ LİSTESİ
+elif menu == "📋 Sipariş Listesi":
+    st.header("Sipariş Geçmişi")
+    data = verileri_getir("Siparisler")
+    if data:
+        df = pd.DataFrame(data)
+        if 'Siparis No' in df.columns:
+            df['Siparis No'] = pd.to_numeric(df['Siparis No'], errors='coerce')
+            df = df.sort_values(by="Siparis No", ascending=False)
+        col1, col2 = st.columns([3, 1])
+        arama = col1.text_input("Arama")
+        if arama: df = df[df.astype(str).apply(lambda x: x.str.contains(arama, case=False)).any(axis=1)]
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.divider()
+        if 'Siparis No' in df.columns and not df.empty:
+            secenekler = df.apply(lambda x: f"{int(x['Siparis No'])} - {x['Müşteri']}", axis=1)
+            secilen = st.selectbox("Fiş Yazdır:", secenekler)
+            if st.button("📄 FİŞ OLUŞTUR"):
+                s_no = int(secilen.split(" - ")[0])
+                sip = df[df['Siparis No'] == s_no].iloc[0].to_dict()
+                pdf_data = create_pdf(sip, GUNCEL_URUNLER)
+                st.download_button("📥 İNDİR", pdf_data, f"Siparis_{s_no}.pdf", "application/pdf", type="primary")
+
+# 3. FATURA TAKİBİ
+elif menu == "🧾 Fatura Takibi":
+    st.header("Müşteri Fatura Yönetimi")
+    try:
+        raw_data = verileri_getir("Siparisler")
+        if raw_data:
+            df = pd.DataFrame(raw_data)
+            df['Tutar_float'] = df['Tutar'].apply(lambda x: safe_float(x))
+            if "Fatura Durumu" not in df.columns: st.error("Veritabanında 'Fatura Durumu' sütunu bulunamadı.")
+            else:
+                tab1, tab2 = st.tabs(["🔴 Kesilecekler", "🟢 Kesilenler"])
+                with tab1:
+                    bekleyenler = df[df["Fatura Durumu"] != "KESİLDİ"].copy()
+                    if not bekleyenler.empty:
+                        st.metric("Bekleyen Tutar", f"{bekleyenler['Tutar_float'].sum():,.2f} TL")
+                        st.dataframe(bekleyenler[["Siparis No", "Tarih", "Müşteri", "Tutar", "Fatura Durumu"]], use_container_width=True)
+                        secenekler = bekleyenler.apply(lambda x: f"{x['Siparis No']} - {x['Müşteri']} ({x['Tutar']})", axis=1).tolist()
+                        secilen_faturalar = st.multiselect("Kesildi İşaretle:", secenekler)
+                        if st.button("ONAYLA"):
+                            if secilen_faturalar:
+                                siparis_nolar = [int(s.split(" - ")[0]) for s in secilen_faturalar]
+                                sonuc = fatura_durumunu_kesildi_yap(siparis_nolar)
+                                if sonuc == "BAŞARILI":
+                                    st.success("Güncellendi!")
+                                    st.rerun()
+                                else: st.error(sonuc)
+                    else: st.success("Kesilecek fatura kalmadı.")
+                with tab2:
+                    kesilenler = df[df["Fatura Durumu"] == "KESİLDİ"]
+                    st.dataframe(kesilenler[["Siparis No", "Tarih", "Müşteri", "Tutar", "Fatura Durumu"]], use_container_width=True)
+    except Exception as e: st.error(f"Hata: {e}")
 
 # 4. ALIŞ VE TEDARİK
 elif menu == "🧾 Alış ve Tedarik":
     st.header("Tedarikçi Alış Yönetimi")
-    c_data = verileri_getir("Cariler")
-    c_list = list(set([r['Cari Adı'] for r in c_data])) if c_data else []
-    m_dict = get_maliyet_dict()
-    s_data = verileri_getir("Siparisler")
-    if s_data:
-        df_s = pd.DataFrame(s_data)
-        bekleyenler = df_s[df_s["Tedarik Durumu"] != "TEDARİKÇİ KESTİ"].copy()
-        if not bekleyenler.empty:
-            secilen_cari = st.selectbox("Tedarikçi Seç:", c_list)
-            st.dataframe(bekleyenler[["Siparis No", "Müşteri", "Ürün 1", "Adet 1"]])
-            secenekler = bekleyenler.apply(lambda x: f"{x['Siparis No']} - {x['Müşteri']}", axis=1).tolist()
-            sel = st.multiselect("Faturası Gelen Siparişleri Seç:", secenekler)
-            if st.button("ONAYLA VE CARİYE İŞLE"):
-                ids = [int(s.split(" - ")[0]) for s in sel]
-                islenecek = bekleyenler[bekleyenler['Siparis No'].isin(ids)].to_dict('records')
-                res = tedarik_durumunu_guncelle_ve_cariye_isle(islenecek, secilen_cari, m_dict)
-                if res == "BAŞARILI": st.success("İşlendi!"); st.rerun()
-        else: st.success("Bekleyen tedarik yok.")
+    cariler_data = verileri_getir("Cariler")
+    cari_listesi = []
+    if cariler_data:
+        df_cariler = pd.DataFrame(cariler_data)
+        if "Cari Adı" in df_cariler.columns: cari_listesi = df_cariler["Cari Adı"].unique().tolist()
+    maliyet_sozlugu = get_maliyet_dict()
+
+    if not cari_listesi:
+        st.warning("Lütfen önce 'Cari Hesaplar' bölümünden tedarikçi (cari) oluşturun.")
+    else:
+        siparis_data = verileri_getir("Siparisler")
+        if siparis_data:
+            df_siparis = pd.DataFrame(siparis_data)
+            if "Tedarik Durumu" not in df_siparis.columns:
+                st.error("⚠️ Lütfen Google Sheets 'Siparisler' sayfasının en sağına 'Tedarik Durumu' başlığı ekleyin.")
+            else:
+                bekleyenler = df_siparis[df_siparis["Tedarik Durumu"] != "TEDARİKÇİ KESTİ"].copy()
+                if not bekleyenler.empty:
+                    st.info("Faturası kesilen siparişleri seçip onaylayın.")
+                    secilen_cari = st.selectbox("Hangi Tedarikçi Kesti?", cari_listesi)
+                    st.dataframe(bekleyenler[["Siparis No", "Müşteri", "Ürün 1", "Adet 1", "Ürün 2", "Adet 2"]], use_container_width=True)
+                    
+                    secenekler = bekleyenler.apply(lambda x: f"{x['Siparis No']} - {x['Müşteri']} ({x['Ürün 1']})", axis=1).tolist()
+                    secilen_siparisler = st.multiselect("Faturası Gelen Siparişleri Seç:", secenekler)
+                    col_b1, col_b2 = st.columns(2)
+                    with col_b1:
+                        if st.button("SEÇİLENLERİ ONAYLA & CARİYE İŞLE"):
+                            if secilen_siparisler:
+                                secilen_nolar = [int(s.split(" - ")[0]) for s in secilen_siparisler]
+                                islenecek_satirlar = bekleyenler[bekleyenler['Siparis No'].isin(secilen_nolar)].to_dict('records')
+                                sonuc = tedarik_durumunu_guncelle_ve_cariye_isle(islenecek_satirlar, secilen_cari, maliyet_sozlugu)
+                                if sonuc == "BAŞARILI": st.success("✅ İşlem Başarılı!"); st.rerun()
+                                else: st.error(sonuc)
+                            else: st.warning("Lütfen seçim yapın.")
+                    with col_b2:
+                        st.write("")
+                        if st.button("LİSTEDEKİ HEPSİNİ ONAYLA (TOPLU)", type="primary"):
+                            islenecek_satirlar = bekleyenler.to_dict('records')
+                            sonuc = tedarik_durumunu_guncelle_ve_cariye_isle(islenecek_satirlar, secilen_cari, maliyet_sozlugu)
+                            if sonuc == "BAŞARILI": st.success("🚀 Tüm liste işlendi!"); st.rerun()
+                            else: st.error(sonuc)
+                else: st.success("Tüm siparişlerin tedarik süreci tamamlanmış.")
+        else: st.info("Henüz sipariş yok.")
+
+# 5. RAPORLAR
+elif menu == "📊 Raporlar":
+    st.header("Satış Raporları")
+    try:
+        raw_data = verileri_getir("Siparisler")
+        if raw_data:
+            df = pd.DataFrame(raw_data)
+            df['Tarih_dt'] = pd.to_datetime(df['Tarih'], format="%d.%m.%Y %H:%M", errors='coerce')
+            df['Tarih_gun'] = df['Tarih_dt'].dt.date
+            df['Tutar_float'] = df['Tutar'].apply(lambda x: safe_float(x))
+            f1, f2, f3 = st.columns([1, 1, 2])
+            with f1: secilen_urunler = st.multiselect("Ürün Seçiniz:", list(GUNCEL_URUNLER.keys()))
+            with f2: zaman_secimi = st.selectbox("Dönem:", ["Bugün", "Dün", "Bu Ay", "Geçen Ay", "Son 7 Gün", "Son 30 Gün", "Son 1 Yıl", "Tarih Aralığı Seç"])
+            bugun = simdi().date()
+            bas, bit = bugun, bugun
+            if zaman_secimi == "Bugün": pass
+            elif zaman_secimi == "Dün": bas = bugun - timedelta(days=1); bit = bas
+            elif zaman_secimi == "Son 7 Gün": bas = bugun - timedelta(days=7)
+            elif zaman_secimi == "Son 30 Gün": bas = bugun - timedelta(days=30)
+            elif zaman_secimi == "Son 1 Yıl": bas = bugun - timedelta(days=365)
+            elif zaman_secimi == "Bu Ay": bas = bugun.replace(day=1)
+            elif zaman_secimi == "Geçen Ay": bas = (bugun.replace(day=1) - timedelta(days=1)).replace(day=1); bit = bugun.replace(day=1) - timedelta(days=1)
+            df_f = df[(df['Tarih_gun'] >= bas) & (df['Tarih_gun'] <= bit)]
+            if secilen_urunler: df_f = df_f[df_f['Ürün 1'].isin(secilen_urunler) | df_f['Ürün 2'].isin(secilen_urunler)]
+            if not df_f.empty:
+                st.info(f"📅 {bas.strftime('%d.%m.%Y')} - {bit.strftime('%d.%m.%Y')}")
+                top_ciro = df_f['Tutar_float'].sum()
+                top_sip = len(df_f)
+                a1 = pd.to_numeric(df_f['Adet 1'], errors='coerce').fillna(0).sum()
+                a2 = pd.to_numeric(df_f['Adet 2'], errors='coerce').fillna(0).sum()
+                top_urun = a1 + a2
+                k1, k2, k3 = st.columns(3)
+                k1.metric("Toplam Ciro", f"{top_ciro:,.2f} TL")
+                k2.metric("Sipariş Sayısı", f"{top_sip}")
+                k3.metric("Satılan Ürün", f"{int(top_urun)}")
+                g1, g2 = st.columns(2)
+                with g1:
+                    u1c = df_f['Ürün 1'].value_counts(); u2c = df_f['Ürün 2'].value_counts()
+                    total = u1c.add(u2c, fill_value=0).sort_values(ascending=True)
+                    if '' in total.index: total = total.drop('')
+                    if not total.empty: st.plotly_chart(px.bar(x=total.values, y=total.index, orientation='h', labels={'x':'Adet','y':''}), use_container_width=True)
+                with g2:
+                    if not df_f.empty:
+                        df_grp = df_f.groupby('Tarih_gun')['Tutar_float'].sum().reset_index()
+                        st.plotly_chart(px.line(df_grp, x='Tarih_gun', y='Tutar_float', markers=True), use_container_width=True)
+            else: st.warning("Veri bulunamadı.")
+        else: st.info("Veri yok.")
+    except Exception as e: st.error(f"Hata: {e}")
 
 # 6. CARİ HESAPLAR
 elif menu == "💰 Cari Hesaplar":
-    st.header("Cari Hesap Takip Defteri")
-    
-    with st.expander("➕ Yeni İşlem Kaydet (Fatura/Ödeme)", expanded=True):
-        with st.form("cari_form_yeni"):
+    st.header("Cari Takip")
+    with st.expander("➕ Yeni Fatura / Ödeme İşle", expanded=True):
+        with st.form("cari"):
             c1, c2 = st.columns(2)
-            m_data = verileri_getir("Cariler")
-            c_list = list(set([r['Cari Adı'] for r in m_data])) if m_data else []
-            ad_sec = c1.selectbox("Cari Hesap:", ["Yeni Ekle..."] + c_list)
-            if ad_sec == "Yeni Ekle...": ad = c1.text_input("Yeni Cari Adı:")
-            else: ad = ad_sec
-            
-            f_no = c2.text_input("Fatura No")
-            t_inp = st.text_input("Tutar (Örn: 51.805,20)")
-            if t_inp: st.info(f"Sistem: **{format_excel_tl(safe_float(t_inp))} TL** kaydedecek.")
-            
-            tip = st.radio("İşlem:", ["Fatura Girişi (BORÇ)", "Ödeme Yapıldı (ALACAK)"], horizontal=True)
+            mevcut_data = verileri_getir("Cariler")
+            mevcut_cariler = []
+            if mevcut_data:
+                df_temp = pd.DataFrame(mevcut_data)
+                if "Cari Adı" in df_temp.columns: mevcut_cariler = df_temp["Cari Adı"].unique().tolist()
+            cari_secim = c1.selectbox("Cari Hesap Seç:", ["Yeni Ekle..."] + mevcut_cariler)
+            if cari_secim == "Yeni Ekle...": ad = c1.text_input("Yeni Cari Adı:")
+            else: ad = cari_secim
+            f_tarih = c2.date_input("Fatura Tarihi")
+            f_no = c1.text_input("Fatura No")
+            not_aciklama = c2.text_input("Not / Açıklama")
+            tutar = st.number_input("Tutar (KDV DAHİL)", min_value=0.0, format="%.2f")
+            islem_tipi = st.radio("İşlem Türü:", ["Fatura Girişi (BORÇ)", "Ödeme Yapıldı (ALACAK)"])
             if st.form_submit_button("KAYDET"):
-                t_excel = format_excel_tl(safe_float(t_inp))
-                cari_islem_ekle([ad, simdi().strftime("%d.%m.%Y"), f_no, "Manuel Giriş", t_excel, "BORÇ" if "BORÇ" in tip else "ALACAK"])
-                st.success(f"Kaydedildi: {t_excel} TL")
-                st.rerun()
+                if ad:
+                    tarih_str = f_tarih.strftime("%d.%m.%Y")
+                    tip_kisa = "BORÇ" if "BORÇ" in islem_tipi else "ALACAK"
+                    cari_islem_ekle([ad, tarih_str, f_no, not_aciklama, tutar, tip_kisa])
+                    st.success("Kaydedildi!")
+                    st.cache_resource.clear()
+                    st.rerun()
+                else: st.warning("Cari adı boş olamaz.")
+    if mevcut_data:
+        df = pd.DataFrame(mevcut_data)
+        if 'Cari Adı' in df.columns:
+            secili = st.selectbox("Hesap Detayı Gör:", df['Cari Adı'].unique())
+            if secili:
+                df['Tutar_float'] = df['Tutar'].apply(lambda x: safe_float(x))
+                sub = df[df['Cari Adı'] == secili].copy()
+                st.table(sub[["Tarih", "Fatura No", "Not", "Tutar", "Tip"]])
+                borc = sub[sub['Tip'].astype(str).str.contains("BORÇ")]['Tutar_float'].sum()
+                alacak = sub[sub['Tip'].astype(str).str.contains("ALACAK")]['Tutar_float'].sum()
+                st.metric("GÜNCEL BAKİYE (Alacak - Borç)", f"{alacak - borc:,.2f} TL", delta_color="normal")
+        else: st.warning("Veriler yüklenemedi.")
+    else: st.info("Henüz kayıt yok.")
 
-    if m_data:
-        df_cari = pd.DataFrame(m_data)
-        secili = st.selectbox("Hesap Seç:", df_cari['Cari Adı'].unique())
-        if secili:
-            sub = df_cari[df_cari['Cari Adı'] == secili].copy()
-            sub['T_Float'] = sub['Tutar'].apply(safe_float)
-            st.table(sub[["Tarih", "Fatura No", "Tutar", "Tip"]])
-            borc = sub[sub['Tip'] == "BORÇ"]['T_Float'].sum()
-            alacak = sub[sub['Tip'] == "ALACAK"]['T_Float'].sum()
-            st.metric("GÜNCEL BAKİYE", format_excel_tl(alacak - borc))
-
-# 2. SİPARİŞ LİSTESİ (BASİT)
-elif menu == "📋 Sipariş Listesi":
-    st.header("Siparişler")
-    data = verileri_getir("Siparisler")
-    if data: st.dataframe(pd.DataFrame(data), use_container_width=True)
-
-# 7. MALİYET VE 8. ÜRÜN (KISALTILMIŞ)
+# 7. MALİYET YÖNETİMİ
 elif menu == "📉 Maliyet Yönetimi":
-    st.header("Ürün Maliyetleri")
-    data = verileri_getir("Maliyetler")
-    if data: st.dataframe(pd.DataFrame(data))
+    st.header("Ürün Maliyet Yönetimi")
+    try:
+        maliyet_data = verileri_getir("Maliyetler")
+        df_m = pd.DataFrame(maliyet_data)
+    except: df_m = pd.DataFrame()
+    tab1, tab2 = st.tabs(["📋 Liste / Detay", "➕ Ekle / Güncelle"])
+    with tab1:
+        if not df_m.empty:
+            st.dataframe(df_m, use_container_width=True)
+            if "Ürün Id" in df_m.columns:
+                urunler = df_m["Ürün Id"].unique().tolist()
+                secili = st.selectbox("Detay Gör:", ["Seçiniz..."] + urunler)
+                if secili != "Seçiniz...":
+                    detay = df_m[df_m["Ürün Id"] == secili].iloc[0]
+                    c1, c2 = st.columns([1, 2])
+                    c1.metric("TOPLAM MALİYET", f"{detay.get('MALİYET',0)} TL")
+                    items = {k: v for k, v in detay.items() if k not in ["Görsel", "Ürün Kod", "Ürün Id", "MALİYET"] and isinstance(v, (int, float)) and v > 0}
+                    c2.table(pd.DataFrame(list(items.items()), columns=["Kalem", "Tutar"]))
+            else: st.warning("Excel'de 'Ürün Id' sütunu eksik.")
+        else: st.warning("Maliyet tablosu boş veya okunamadı.")
+    with tab2:
+        st.subheader("Maliyet Kartı")
+        mod = st.radio("İşlem:", ["Güncelle", "Yeni Ekle"], horizontal=True)
+        vals = {}
+        if mod == "Güncelle" and not df_m.empty and "Ürün Id" in df_m.columns:
+            s_id = st.selectbox("Ürün Seç:", df_m["Ürün Id"].unique())
+            if s_id: vals = df_m[df_m["Ürün Id"] == s_id].iloc[0].to_dict()
+        with st.form("maliyet_form"):
+            c1, c2 = st.columns(2)
+            with c1:
+                u_id = st.text_input("Ürün Adı (ID)", value=vals.get("Ürün Id", ""))
+                u_kod = st.text_input("Ürün Kodu", value=vals.get("Ürün Kod", ""))
+                tahta = st.number_input("Tahta", value=safe_int(vals.get("Tahta")))
+                vernik = st.number_input("Vernik", value=safe_int(vals.get("VERNİK")))
+                yakma = st.number_input("Yakma", value=safe_int(vals.get("YAKMA")))
+                boya = st.number_input("Boya", value=safe_int(vals.get("BOYA")))
+            with c2:
+                musluk = st.number_input("Musluk", value=safe_int(vals.get("MUSLUK")))
+                boru = st.number_input("Boru", value=safe_int(vals.get("BORU")))
+                halat = st.number_input("Halat", value=safe_int(vals.get("HALAT")))
+                metal = st.number_input("Metal Çubuk", value=safe_int(vals.get("Metal çubuk")))
+                cam = st.number_input("Cam", value=safe_int(vals.get("CAM")))
+                ugur = st.number_input("Uğur Kar", value=safe_int(vals.get("UĞUR KAR")))
+            toplam = tahta+vernik+yakma+boya+musluk+boru+halat+metal+cam+ugur
+            st.info(f"Hesaplanan: {toplam} TL")
+            if st.form_submit_button("KAYDET"):
+                veri = { "Ürün Id": u_id, "Ürün Kod": u_kod, "Görsel": GUNCEL_URUNLER.get(u_id, ""), "Tahta": tahta, "VERNİK": vernik, "YAKMA": yakma, "BOYA": boya, "MUSLUK": musluk, "BORU": boru, "HALAT": halat, "Metal çubuk": metal, "CAM": cam, "UĞUR KAR": ugur, "MALİYET": toplam }
+                res = maliyet_kaydet(veri)
+                if "HATA" in res: st.error(res)
+                else: st.success(res); st.cache_resource.clear()
 
+# 8. ÜRÜN YÖNETİMİ
 elif menu == "➕ Ürün Yönetimi":
-    st.header("Ürün Ekle")
-    with st.form("u_e"):
+    st.header("Yeni Ürün Tanımla")
+    with st.form("yeni_urun"):
         ad = st.text_input("Ürün Adı")
+        resim = st.file_uploader("Resim", type=['jpg','png','jpeg'])
         if st.form_submit_button("EKLE"):
-            yeni_urun_resim_ekle(ad, "yok.jpg")
-            st.success("Eklendi")
+            if ad and resim:
+                dosya = f"{ad.replace(' ','_')}.jpg"
+                img = Image.open(resim).convert('RGB'); img.save(os.path.join(RESIM_KLASORU, dosya))
+                yeni_urun_resim_ekle(ad, dosya)
+                st.success("Eklendi!")
+            else: st.warning("Eksik bilgi.")
