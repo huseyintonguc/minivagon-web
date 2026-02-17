@@ -34,7 +34,7 @@ def get_sheet():
     client = get_client()
     return client.open(SHEET_ADI)
 
-# --- GÜVENLİ SAYI DÖNÜŞTÜRME ---
+# --- GÜVENLİ SAYI DÖNÜŞTÜRME (ULTRA GÜVENLİ) ---
 def safe_int(val):
     try:
         if pd.isna(val) or str(val).strip() == "": return 0
@@ -42,13 +42,25 @@ def safe_int(val):
     except: return 0
 
 def safe_float(val):
+    """Excel'den gelen her türlü garip para formatını düzeltir."""
     try:
         if pd.isna(val) or str(val).strip() == "": return 0.0
-        return float(str(val).replace("TL","").replace(".","").replace(",", "."))
+        # Eğer zaten sayıysa direkt döndür
+        if isinstance(val, (int, float)): return float(val)
+        
+        # Metin temizliği
+        val_str = str(val).replace("TL", "").replace("tl", "").strip()
+        
+        # Türkçe format (1.250,50) mı yoksa Düz format (1250.50) mı?
+        if "," in val_str:
+            # Noktaları sil (binlik ayırıcı), Virgülü noktaya çevir (kuruş)
+            val_str = val_str.replace(".", "").replace(",", ".")
+        
+        return float(val_str)
     except: return 0.0
 
 # --- VERİ İŞLEMLERİ (CACHING) ---
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=5)
 def verileri_getir(sayfa_adi):
     sh = get_sheet()
     try:
@@ -66,18 +78,27 @@ def siparis_ekle(satir):
     sh = get_sheet()
     try: w = sh.worksheet("Siparisler")
     except:
-        w = sh.add_worksheet(title="Siparisler", rows=100, cols=25)
-        # Sütun başlıklarını güncelle
+        w = sh.add_worksheet(title="Siparisler", rows=100, cols=20)
         w.append_row(["Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Not","Fatura Durumu","Tedarik Durumu"])
     w.append_row(satir)
     cache_temizle()
 
 def cari_islem_ekle(satir):
+    # satir formatı: [Cari Adı, Tarih, Fatura No, Not, Tutar, Tip]
     sh = get_sheet()
     try: w = sh.worksheet("Cariler")
     except:
         w = sh.add_worksheet(title="Cariler", rows=100, cols=6)
         w.append_row(["Cari Adı", "Tarih", "Fatura No", "Not", "Tutar", "Tip"])
+    w.append_row(satir)
+    cache_temizle()
+
+def alis_faturasi_ekle(satir):
+    sh = get_sheet()
+    try: w = sh.worksheet("Alislar")
+    except:
+        w = sh.add_worksheet(title="Alislar", rows=100, cols=9)
+        w.append_row(["Tarih", "Bağlı Sipariş", "Cari Hesap", "Ürün", "Adet", "Birim Fiyat", "Toplam", "Durum", "Not"])
     w.append_row(satir)
     cache_temizle()
 
@@ -106,10 +127,6 @@ def fatura_durumunu_kesildi_yap(siparis_nolar):
     except Exception as e: return f"HATA: {e}"
 
 def tedarik_durumunu_guncelle_ve_cariye_isle(siparis_bilgileri, cari_hesap, maliyet_sozlugu):
-    """
-    Siparişlerin 'Tedarik Durumu'nu günceller ve maliyetleri hesaplayıp cariye işler.
-    siparis_bilgileri: List of dicts (Order rows)
-    """
     sh = get_sheet()
     ws_siparis = sh.worksheet("Siparisler")
     ws_cari = sh.worksheet("Cariler")
@@ -118,15 +135,11 @@ def tedarik_durumunu_guncelle_ve_cariye_isle(siparis_bilgileri, cari_hesap, mali
     try:
         headers = ws_siparis.row_values(1)
         sip_no_col = headers.index("Siparis No") + 1
-        
-        # Eğer Tedarik Durumu sütunu yoksa en sona eklemeyi dene veya hata ver
-        try:
-            tedarik_col = headers.index("Tedarik Durumu") + 1
-        except:
-            return "HATA: 'Siparisler' sayfasında 'Tedarik Durumu' sütunu bulunamadı."
+        try: tedarik_col = headers.index("Tedarik Durumu") + 1
+        except: return "HATA: 'Siparisler' sayfasında 'Tedarik Durumu' sütunu yok."
 
         toplam_maliyet = 0
-        islenen_siparis_nolar = []
+        islenen_nolar = []
 
         for sip in siparis_bilgileri:
             sip_no = sip['Siparis No']
@@ -135,32 +148,48 @@ def tedarik_durumunu_guncelle_ve_cariye_isle(siparis_bilgileri, cari_hesap, mali
             u2 = sip.get('Ürün 2', '')
             a2 = safe_int(sip.get('Adet 2', 0))
             
-            # Maliyet Hesapla
-            maliyet1 = maliyet_sozlugu.get(u1, 0) * a1
-            maliyet2 = maliyet_sozlugu.get(u2, 0) * a2
-            toplam_maliyet += (maliyet1 + maliyet2)
+            m1 = maliyet_sozlugu.get(u1, 0) * a1
+            m2 = maliyet_sozlugu.get(u2, 0) * a2
+            toplam_maliyet += (m1 + m2)
             
-            islenen_siparis_nolar.append(str(sip_no))
+            islenen_nolar.append(str(sip_no))
             
-            # Durumu Güncelle
             cell = ws_siparis.find(str(sip_no), in_column=sip_no_col)
-            if cell:
-                ws_siparis.update_cell(cell.row, tedarik_col, "TEDARİKÇİ KESTİ")
+            if cell: ws_siparis.update_cell(cell.row, tedarik_col, "TEDARİKÇİ KESTİ")
 
-        # Cariye İşle (KDV Dahil mi Hariç mi? Maliyet tablosu genelde maliyettir. 
-        # Kullanıcı "KDV Dahil olacak" demişti önceki promptta cari için.
-        # Biz maliyet tablosundan gelen veriyi baz alıyoruz. Maliyet tablosu ham maliyet ise üstüne KDV eklenebilir.
-        # Varsayılan olarak Maliyet Tablosundaki rakam * 1.20 (KDV) yapalım.)
-        
+        # KDV Dahil Maliyet
         tutar_kdv_dahil = toplam_maliyet * 1.20
-        aciklama = f"Toplu Tedarik Faturası (Siparişler: {', '.join(islenen_siparis_nolar)})"
+        aciklama = f"Sipariş Maliyetleri: {', '.join(islenen_nolar)}"
         
         # [Cari Adı, Tarih, Fatura No, Not, Tutar, Tip]
-        ws_cari.append_row([cari_hesap, tarih_str, "TOPLU-ALIS", aciklama, tutar_kdv_dahil, "BORÇ"])
+        ws_cari.append_row([cari_hesap, tarih_str, "OTO-ALIS", aciklama, tutar_kdv_dahil, "BORÇ"])
         
         cache_temizle()
         return "BAŞARILI"
+    except Exception as e: return f"HATA: {e}"
+
+def alis_faturasi_onayla(alis_indexler):
+    sh = get_sheet()
+    try: ws_alis = sh.worksheet("Alislar")
+    except: return "Alislar sayfası yok"
+    try: ws_cari = sh.worksheet("Cariler")
+    except: 
+        ws_cari = sh.add_worksheet(title="Cariler", rows=100, cols=6)
+        ws_cari.append_row(["Cari Adı", "Tarih", "Fatura No", "Not", "Tutar", "Tip"])
     
+    tarih_str = simdi().strftime("%d.%m.%Y")
+    try:
+        headers = ws_alis.row_values(1)
+        durum_col = headers.index("Durum") + 1
+        
+        for row_num, cari_hesap, net_tutar, aciklama in alis_indexler:
+            ws_alis.update_cell(row_num + 2, durum_col, "FATURALAŞTI")
+            net_val = safe_float(net_tutar)
+            brut_tutar = net_val * 1.20
+            # [Cari Adı, Tarih, Fatura No, Not, Tutar, Tip]
+            ws_cari.append_row([cari_hesap, tarih_str, "ALIS-FAT", aciklama, brut_tutar, "BORÇ"])
+        cache_temizle()
+        return "BAŞARILI"
     except Exception as e: return f"HATA: {e}"
 
 def maliyet_kaydet(veriler):
@@ -208,18 +237,14 @@ def get_urun_resimleri():
 
 GUNCEL_URUNLER = get_urun_resimleri()
 
-# --- MALİYET SÖZLÜĞÜ GETİR ---
 def get_maliyet_dict():
     maliyetler = verileri_getir("Maliyetler")
     m_dict = {}
     if maliyetler:
         for m in maliyetler:
-            # Ürün Id ve MALİYET sütunlarını kullan
-            # Sütun isimleri Excel'deki gibi olmalı
             u_id = m.get("Ürün Id") or m.get("Urun Id")
             cost = safe_float(m.get("MALİYET") or m.get("Maliyet"))
-            if u_id:
-                m_dict[u_id] = cost
+            if u_id: m_dict[u_id] = cost
     return m_dict
 
 # --- PDF OLUŞTURMA ---
@@ -304,9 +329,7 @@ if menu == "📦 Sipariş Girişi":
             adres = st.text_area("Adres", height=100)
             notlar = st.text_input("Not")
             fatura = "KESİLDİ" if st.checkbox("Faturası Kesildi") else "KESİLMEDİ"
-            # Varsayılan Tedarik Durumu
             tedarik = "BEKLİYOR"
-            
             if st.form_submit_button("KAYDET", type="primary"):
                 try:
                     mevcut = verileri_getir("Siparisler")
@@ -377,79 +400,52 @@ elif menu == "🧾 Fatura Takibi":
                     st.dataframe(kesilenler[["Siparis No", "Tarih", "Müşteri", "Tutar", "Fatura Durumu"]], use_container_width=True)
     except Exception as e: st.error(f"Hata: {e}")
 
-# 4. ALIŞ VE TEDARİK (YENİLENDİ: SİPARİŞ LİSTESİNDEN SEÇMELİ)
+# 4. ALIŞ VE TEDARİK
 elif menu == "🧾 Alış ve Tedarik":
     st.header("Tedarikçi Alış Yönetimi")
-    
-    # Cari Hesaplarını Çek
     cariler_data = verileri_getir("Cariler")
     cari_listesi = []
     if cariler_data:
         df_cariler = pd.DataFrame(cariler_data)
-        if "Cari Adı" in df_cariler.columns:
-            cari_listesi = df_cariler["Cari Adı"].unique().tolist()
-            
-    # Maliyetleri Çek
+        if "Cari Adı" in df_cariler.columns: cari_listesi = df_cariler["Cari Adı"].unique().tolist()
     maliyet_sozlugu = get_maliyet_dict()
 
     if not cari_listesi:
         st.warning("Lütfen önce 'Cari Hesaplar' bölümünden tedarikçi (cari) oluşturun.")
     else:
-        # Sipariş Verilerini Çek
         siparis_data = verileri_getir("Siparisler")
         if siparis_data:
             df_siparis = pd.DataFrame(siparis_data)
-            
             if "Tedarik Durumu" not in df_siparis.columns:
                 st.error("⚠️ Lütfen Google Sheets 'Siparisler' sayfasının en sağına 'Tedarik Durumu' başlığı ekleyin.")
             else:
-                # Sadece tedarik edilmemişleri göster
                 bekleyenler = df_siparis[df_siparis["Tedarik Durumu"] != "TEDARİKÇİ KESTİ"].copy()
-                
                 if not bekleyenler.empty:
-                    st.info("Aşağıdaki listeden tedarikçisi faturasını kesen siparişleri seçin.")
-                    
-                    # Cari Seçimi
+                    st.info("Faturası kesilen siparişleri seçip onaylayın.")
                     secilen_cari = st.selectbox("Hangi Tedarikçi Kesti?", cari_listesi)
-                    
-                    # Tabloyu Göster
                     st.dataframe(bekleyenler[["Siparis No", "Müşteri", "Ürün 1", "Adet 1", "Ürün 2", "Adet 2"]], use_container_width=True)
                     
-                    st.markdown("### ✅ İşlem Yap")
-                    
-                    # Çoklu Seçim
                     secenekler = bekleyenler.apply(lambda x: f"{x['Siparis No']} - {x['Müşteri']} ({x['Ürün 1']})", axis=1).tolist()
                     secilen_siparisler = st.multiselect("Faturası Gelen Siparişleri Seç:", secenekler)
-                    
                     col_b1, col_b2 = st.columns(2)
-                    
                     with col_b1:
-                        if st.button("SEÇİLENLERİN FATURASI KESİLDİ & CARİYE İŞLE"):
+                        if st.button("SEÇİLENLERİ ONAYLA & CARİYE İŞLE"):
                             if secilen_siparisler:
                                 secilen_nolar = [int(s.split(" - ")[0]) for s in secilen_siparisler]
-                                # İlgili satırları bul
                                 islenecek_satirlar = bekleyenler[bekleyenler['Siparis No'].isin(secilen_nolar)].to_dict('records')
-                                
                                 sonuc = tedarik_durumunu_guncelle_ve_cariye_isle(islenecek_satirlar, secilen_cari, maliyet_sozlugu)
-                                if sonuc == "BAŞARILI":
-                                    st.success("✅ Seçilen siparişler güncellendi ve cariye işlendi!")
-                                    st.rerun()
+                                if sonuc == "BAŞARILI": st.success("✅ İşlem Başarılı!"); st.rerun()
                                 else: st.error(sonuc)
-                            else: st.warning("Lütfen en az bir sipariş seçin.")
-                    
+                            else: st.warning("Lütfen seçim yapın.")
                     with col_b2:
                         st.write("")
                         if st.button("LİSTEDEKİ HEPSİNİ ONAYLA (TOPLU)", type="primary"):
                             islenecek_satirlar = bekleyenler.to_dict('records')
                             sonuc = tedarik_durumunu_guncelle_ve_cariye_isle(islenecek_satirlar, secilen_cari, maliyet_sozlugu)
-                            if sonuc == "BAŞARILI":
-                                st.success("🚀 Tüm liste güncellendi ve cariye işlendi!")
-                                st.rerun()
+                            if sonuc == "BAŞARILI": st.success("🚀 Tüm liste işlendi!"); st.rerun()
                             else: st.error(sonuc)
-                else:
-                    st.success("Tüm siparişlerin tedarik süreci tamamlanmış.")
-        else:
-            st.info("Henüz sipariş yok.")
+                else: st.success("Tüm siparişlerin tedarik süreci tamamlanmış.")
+        else: st.info("Henüz sipariş yok.")
 
 # 5. RAPORLAR
 elif menu == "📊 Raporlar":
@@ -462,33 +458,19 @@ elif menu == "📊 Raporlar":
             df['Tarih_gun'] = df['Tarih_dt'].dt.date
             df['Tutar_float'] = df['Tutar'].apply(lambda x: safe_float(x))
             f1, f2, f3 = st.columns([1, 1, 2])
-            with f1:
-                secilen_urunler = st.multiselect("Ürün Seçiniz:", list(GUNCEL_URUNLER.keys()))
-            with f2:
-                zaman_secimi = st.selectbox("Dönem:", ["Bugün", "Dün", "Bu Ay", "Geçen Ay", "Son 7 Gün", "Son 30 Gün", "Son 1 Yıl", "Tarih Aralığı Seç"])
-
+            with f1: secilen_urunler = st.multiselect("Ürün Seçiniz:", list(GUNCEL_URUNLER.keys()))
+            with f2: zaman_secimi = st.selectbox("Dönem:", ["Bugün", "Dün", "Bu Ay", "Geçen Ay", "Son 7 Gün", "Son 30 Gün", "Son 1 Yıl", "Tarih Aralığı Seç"])
             bugun = simdi().date()
             bas, bit = bugun, bugun
-
             if zaman_secimi == "Bugün": pass
             elif zaman_secimi == "Dün": bas = bugun - timedelta(days=1); bit = bas
             elif zaman_secimi == "Son 7 Gün": bas = bugun - timedelta(days=7)
             elif zaman_secimi == "Son 30 Gün": bas = bugun - timedelta(days=30)
             elif zaman_secimi == "Son 1 Yıl": bas = bugun - timedelta(days=365)
             elif zaman_secimi == "Bu Ay": bas = bugun.replace(day=1)
-            elif zaman_secimi == "Geçen Ay":
-                bu_ay_ilk = bugun.replace(day=1)
-                gecen_ay_son = bu_ay_ilk - timedelta(days=1)
-                bas = gecen_ay_son.replace(day=1); bit = gecen_ay_son
-            elif zaman_secimi == "Tarih Aralığı Seç":
-                with f3:
-                    d_range = st.date_input("Aralık:", (bugun - timedelta(days=7), bugun))
-                    if len(d_range) == 2: bas, bit = d_range
-
+            elif zaman_secimi == "Geçen Ay": bas = (bugun.replace(day=1) - timedelta(days=1)).replace(day=1); bit = bugun.replace(day=1) - timedelta(days=1)
             df_f = df[(df['Tarih_gun'] >= bas) & (df['Tarih_gun'] <= bit)]
-            if secilen_urunler:
-                df_f = df_f[df_f['Ürün 1'].isin(secilen_urunler) | df_f['Ürün 2'].isin(secilen_urunler)]
-
+            if secilen_urunler: df_f = df_f[df_f['Ürün 1'].isin(secilen_urunler) | df_f['Ürün 2'].isin(secilen_urunler)]
             if not df_f.empty:
                 st.info(f"📅 {bas.strftime('%d.%m.%Y')} - {bit.strftime('%d.%m.%Y')}")
                 top_ciro = df_f['Tutar_float'].sum()
@@ -496,26 +478,20 @@ elif menu == "📊 Raporlar":
                 a1 = pd.to_numeric(df_f['Adet 1'], errors='coerce').fillna(0).sum()
                 a2 = pd.to_numeric(df_f['Adet 2'], errors='coerce').fillna(0).sum()
                 top_urun = a1 + a2
-
                 k1, k2, k3 = st.columns(3)
                 k1.metric("Toplam Ciro", f"{top_ciro:,.2f} TL")
                 k2.metric("Sipariş Sayısı", f"{top_sip}")
                 k3.metric("Satılan Ürün", f"{int(top_urun)}")
-
                 g1, g2 = st.columns(2)
                 with g1:
-                    u1c = df_f['Ürün 1'].value_counts()
-                    u2c = df_f['Ürün 2'].value_counts()
+                    u1c = df_f['Ürün 1'].value_counts(); u2c = df_f['Ürün 2'].value_counts()
                     total = u1c.add(u2c, fill_value=0).sort_values(ascending=True)
                     if '' in total.index: total = total.drop('')
-                    if not total.empty:
-                        fig = px.bar(x=total.values, y=total.index, orientation='h', labels={'x':'Adet','y':''})
-                        st.plotly_chart(fig, use_container_width=True)
+                    if not total.empty: st.plotly_chart(px.bar(x=total.values, y=total.index, orientation='h', labels={'x':'Adet','y':''}), use_container_width=True)
                 with g2:
                     if not df_f.empty:
                         df_grp = df_f.groupby('Tarih_gun')['Tutar_float'].sum().reset_index()
-                        fig2 = px.line(df_grp, x='Tarih_gun', y='Tutar_float', markers=True)
-                        st.plotly_chart(fig2, use_container_width=True)
+                        st.plotly_chart(px.line(df_grp, x='Tarih_gun', y='Tutar_float', markers=True), use_container_width=True)
             else: st.warning("Veri bulunamadı.")
         else: st.info("Veri yok.")
     except Exception as e: st.error(f"Hata: {e}")
@@ -523,7 +499,6 @@ elif menu == "📊 Raporlar":
 # 6. CARİ HESAPLAR
 elif menu == "💰 Cari Hesaplar":
     st.header("Cari Takip")
-    
     with st.expander("➕ Yeni Fatura / Ödeme İşle", expanded=True):
         with st.form("cari"):
             c1, c2 = st.columns(2)
@@ -531,21 +506,17 @@ elif menu == "💰 Cari Hesaplar":
             mevcut_cariler = []
             if mevcut_data:
                 df_temp = pd.DataFrame(mevcut_data)
-                if "Cari Adı" in df_temp.columns:
-                    mevcut_cariler = df_temp["Cari Adı"].unique().tolist()
+                if "Cari Adı" in df_temp.columns: mevcut_cariler = df_temp["Cari Adı"].unique().tolist()
             cari_secim = c1.selectbox("Cari Hesap Seç:", ["Yeni Ekle..."] + mevcut_cariler)
             if cari_secim == "Yeni Ekle...": ad = c1.text_input("Yeni Cari Adı:")
             else: ad = cari_secim
-            
             f_tarih = c2.date_input("Fatura Tarihi")
             f_no = c1.text_input("Fatura No")
             not_aciklama = c2.text_input("Not / Açıklama")
             tutar = st.number_input("Tutar (KDV DAHİL)", min_value=0.0, format="%.2f")
             islem_tipi = st.radio("İşlem Türü:", ["Fatura Girişi (BORÇ)", "Ödeme Yapıldı (ALACAK)"])
-            
             if st.form_submit_button("KAYDET"):
                 if ad:
-                    # Yeni Format: [Cari Adı, Tarih, Fatura No, Not, Tutar, Tip]
                     tarih_str = f_tarih.strftime("%d.%m.%Y")
                     tip_kisa = "BORÇ" if "BORÇ" in islem_tipi else "ALACAK"
                     cari_islem_ekle([ad, tarih_str, f_no, not_aciklama, tutar, tip_kisa])
@@ -553,7 +524,6 @@ elif menu == "💰 Cari Hesaplar":
                     st.cache_resource.clear()
                     st.rerun()
                 else: st.warning("Cari adı boş olamaz.")
-
     if mevcut_data:
         df = pd.DataFrame(mevcut_data)
         if 'Cari Adı' in df.columns:
@@ -561,13 +531,11 @@ elif menu == "💰 Cari Hesaplar":
             if secili:
                 df['Tutar_float'] = df['Tutar'].apply(lambda x: safe_float(x))
                 sub = df[df['Cari Adı'] == secili].copy()
-                
                 st.table(sub[["Tarih", "Fatura No", "Not", "Tutar", "Tip"]])
-                
                 borc = sub[sub['Tip'].astype(str).str.contains("BORÇ")]['Tutar_float'].sum()
                 alacak = sub[sub['Tip'].astype(str).str.contains("ALACAK")]['Tutar_float'].sum()
                 st.metric("GÜNCEL BAKİYE (Alacak - Borç)", f"{alacak - borc:,.2f} TL", delta_color="normal")
-        else: st.warning("Veriler yüklenemedi, sütunları kontrol edin.")
+        else: st.warning("Veriler yüklenemedi.")
     else: st.info("Henüz kayıt yok.")
 
 # 7. MALİYET YÖNETİMİ
