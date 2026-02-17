@@ -47,36 +47,40 @@ def safe_float(val):
         return float(str(val).replace("TL","").replace(".","").replace(",", "."))
     except: return 0.0
 
-# --- VERİ İŞLEMLERİ ---
+# --- VERİ İŞLEMLERİ (CACHING EKLENDİ - 429 HATASI ÇÖZÜMÜ) ---
+# TTL=15: Verileri 15 saniye hafızada tut, sürekli Google'a sorma.
+@st.cache_data(ttl=15)
 def verileri_getir(sayfa_adi):
     sh = get_sheet()
     try:
         w = sh.worksheet(sayfa_adi)
         return w.get_all_records()
     except gspread.exceptions.WorksheetNotFound:
-        # Eğer sayfa yoksa boş liste dön, hata verme
         return []
     except Exception as e:
         return []
+
+# Yazma işlemi yapınca Cache'i temizle ki yeni veri görünsün
+def cache_temizle():
+    st.cache_data.clear()
 
 def siparis_ekle(satir):
     sh = get_sheet()
     try: w = sh.worksheet("Siparisler")
     except:
         w = sh.add_worksheet(title="Siparisler", rows=100, cols=20)
-        # Başlıkları yaz (İlk oluşum)
         w.append_row(["Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Not","Fatura Durumu"])
     w.append_row(satir)
+    cache_temizle()
 
 def cari_islem_ekle(satir):
     sh = get_sheet()
-    try: 
-        w = sh.worksheet("Cariler")
+    try: w = sh.worksheet("Cariler")
     except:
-        # Sayfa yoksa otomatik oluştur
         w = sh.add_worksheet(title="Cariler", rows=100, cols=5)
         w.append_row(["Cari Adı", "Tarih", "İşlem Tipi", "Açıklama", "Tutar"])
     w.append_row(satir)
+    cache_temizle()
 
 def alis_faturasi_ekle(satir):
     sh = get_sheet()
@@ -85,6 +89,7 @@ def alis_faturasi_ekle(satir):
         w = sh.add_worksheet(title="Alislar", rows=100, cols=9)
         w.append_row(["Tarih", "Bağlı Sipariş", "Cari Hesap", "Ürün", "Adet", "Birim Fiyat", "Toplam", "Durum", "Not"])
     w.append_row(satir)
+    cache_temizle()
 
 def yeni_urun_resim_ekle(ad, resim_adi):
     sh = get_sheet()
@@ -93,6 +98,7 @@ def yeni_urun_resim_ekle(ad, resim_adi):
         w = sh.add_worksheet(title="Urunler", rows=100, cols=2)
         w.append_row(["Urun Adi", "Resim Dosya Adi"])
     w.append_row([ad, resim_adi])
+    cache_temizle()
 
 # --- ÖZEL FONKSİYONLAR ---
 def fatura_durumunu_kesildi_yap(siparis_nolar):
@@ -105,6 +111,7 @@ def fatura_durumunu_kesildi_yap(siparis_nolar):
         for sip_no in siparis_nolar:
             cell = w.find(str(sip_no), in_column=sip_no_col)
             if cell: w.update_cell(cell.row, fatura_col, "KESİLDİ")
+        cache_temizle()
         return "BAŞARILI"
     except Exception as e: return f"HATA: {e}"
 
@@ -115,7 +122,6 @@ def alis_faturasi_onayla(alis_indexler):
     
     try: ws_cari = sh.worksheet("Cariler")
     except: 
-        # Cariler yoksa oluştur
         ws_cari = sh.add_worksheet(title="Cariler", rows=100, cols=5)
         ws_cari.append_row(["Cari Adı", "Tarih", "İşlem Tipi", "Açıklama", "Tutar"])
     
@@ -129,6 +135,7 @@ def alis_faturasi_onayla(alis_indexler):
             ws_alis.update_cell(row_num + 2, durum_col, "FATURALAŞTI")
             cari_satir = [cari_hesap, tarih_str, "FATURA (Borç)", aciklama, tutar]
             ws_cari.append_row(cari_satir)
+        cache_temizle()
         return "BAŞARILI"
     except Exception as e: return f"HATA: {e}"
 
@@ -149,8 +156,10 @@ def maliyet_kaydet(veriler):
         if idx:
             r = idx[0] + 2
             w.update(f"A{r}:N{r}", [yeni])
+            cache_temizle()
             return "GÜNCELLENDİ"
         w.append_row(yeni)
+        cache_temizle()
         return "EKLENDİ"
     except Exception as e: return f"HATA: {e}"
 
@@ -319,7 +328,6 @@ elif menu == "🧾 Fatura Takibi":
                                 sonuc = fatura_durumunu_kesildi_yap(siparis_nolar)
                                 if sonuc == "BAŞARILI":
                                     st.success("Güncellendi!")
-                                    st.cache_resource.clear()
                                     st.rerun()
                                 else: st.error(sonuc)
                     else: st.success("Kesilecek fatura kalmadı.")
@@ -359,7 +367,6 @@ elif menu == "🧾 Alış ve Tedarik":
             col_sip = st.selectbox("Bağlı Olduğu Sipariş (Zorunlu Değil)", ["Genel Stok"] + siparis_listesi)
             
             c1, c2 = st.columns(2)
-            # Eğer cari listesi boşsa manuel giriş kutusu göster
             if cari_listesi:
                 secilen_cari = c1.selectbox("Tedarikçi (Cari Hesap)", cari_listesi)
             else:
@@ -387,7 +394,6 @@ elif menu == "🧾 Alış ve Tedarik":
                     satir = [tarih, col_sip, secilen_cari, urun_final, adet, birim_fiyat, toplam, "BEKLİYOR", notlar]
                     alis_faturasi_ekle(satir)
                     st.success("✅ Alış talimatı sisteme girildi!")
-                    st.cache_resource.clear()
                 else: st.warning("Tedarikçi ve Ürün seçiniz.")
 
     with tab2:
@@ -428,7 +434,6 @@ elif menu == "🧾 Alış ve Tedarik":
                                 sonuc = alis_faturasi_onayla(islem_listesi)
                                 if sonuc == "BAŞARILI":
                                     st.success("✅ İşlem tamamlandı!")
-                                    st.cache_resource.clear()
                                     st.rerun()
                                 else: st.error(sonuc)
                         
@@ -542,7 +547,6 @@ elif menu == "💰 Cari Hesaplar":
                 if ad:
                     cari_islem_ekle([ad, simdi().strftime("%d.%m.%Y"), tip, desc, tutar])
                     st.success("Kaydedildi!")
-                    st.cache_resource.clear()
                     st.rerun()
                 else:
                     st.warning("Cari adı boş olamaz.")
