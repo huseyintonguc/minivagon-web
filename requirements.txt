@@ -5,3 +5,4 @@ oauth2client
 fpdf
 Pillow
 pytz
+plotly
