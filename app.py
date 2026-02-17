@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import pytz
 from fpdf import FPDF
 from PIL import Image
@@ -53,65 +53,16 @@ def cari_islem_ekle(satir):
     w.append_row(satir)
 
 def yeni_urun_resim_ekle(ad, resim_adi):
-    # Bu fonksiyon sadece Urunler sayfasına resim yolu ekler
     sh = get_sheet()
-    try:
-        w = sh.worksheet("Urunler")
-    except:
+    try: w = sh.worksheet("Urunler")
+    except: 
         w = sh.add_worksheet(title="Urunler", rows=100, cols=2)
         w.append_row(["Urun Adi", "Resim Dosya Adi"])
     w.append_row([ad, resim_adi])
 
-# --- MALİYET GÜNCELLEME / EKLEME FONKSİYONU ---
-def maliyet_kaydet(veriler):
-    sh = get_sheet()
-    w = sh.worksheet("Maliyetler")
-    
-    # Mevcut verileri çekip ürün var mı kontrol et
-    tum_veriler = w.get_all_records()
-    df = pd.DataFrame(tum_veriler)
-    
-    # Satır verisi hazırlama (Sıralama Excel ile aynı olmalı)
-    # ['Görsel', 'Ürün Kod', 'Ürün Id', 'Tahta', 'VERNİK', 'YAKMA', 'BOYA', 'MUSLUK', 'BORU', 'HALAT', 'Metal çubuk', 'CAM', 'UĞUR KAR', 'MALİYET']
-    yeni_satir = [
-        veriler.get("Görsel", ""),
-        veriler.get("Ürün Kod", ""),
-        veriler.get("Ürün Id", ""),
-        veriler.get("Tahta", 0),
-        veriler.get("VERNİK", 0),
-        veriler.get("YAKMA", 0),
-        veriler.get("BOYA", 0),
-        veriler.get("MUSLUK", 0),
-        veriler.get("BORU", 0),
-        veriler.get("HALAT", 0),
-        veriler.get("Metal çubuk", 0),
-        veriler.get("CAM", 0),
-        veriler.get("UĞUR KAR", 0),
-        veriler.get("MALİYET", 0)
-    ]
-
-    # Güncelleme mi Ekleme mi?
-    try:
-        # Ürün ID'sinin olduğu satırı bul (Excel'de başlık 1. satır olduğu için +2 eklenir)
-        # Pandas indexi 0'dan başlar, gspread satırı 1'den başlar. Başlık satırı da var.
-        row_idx = df.index[df['Ürün Id'] == veriler["Ürün Id"]].tolist()
-        
-        if row_idx:
-            # GÜNCELLEME (Bulunan ilk satırı güncelle)
-            gspread_row = row_idx[0] + 2 
-            # A hücresinden N hücresine kadar güncelle
-            w.update(f"A{gspread_row}:N{gspread_row}", [yeni_satir])
-            return "GÜNCELLENDİ"
-        else:
-            # EKLEME
-            w.append_row(yeni_satir)
-            return "EKLENDİ"
-    except Exception as e:
-        return f"HATA: {e}"
-
 # --- ÜRÜN RESİMLERİNİ GETİR ---
 def get_urun_resimleri():
-    # Urunler sayfasından ve kod içindeki sabitlerden birleşik liste yapar
+    # Sabit Liste (Yedek)
     sabitler = {
         "6 LI KADEHLİK": "6likadehlik.jpg", "2 LI KALPLİ KADEHLİK": "2likalplikadehlik.jpg",
         "3 LÜ KADEHLİK": "3lukadehlik.jpg", "İKİLİ STAND": "ikilistand.jpg",
@@ -123,13 +74,43 @@ def get_urun_resimleri():
         "SİNEK AS": "sinekas.jpg", "YANIK NARGİLE SEHPA": "yaniknargilesehpa.jpg",
         "AÇIK RENK NARGİLE SEHPA": "acikrenknargilesehpa.jpg", "SİYAH TEKLİ STAND": "syhteklistand.jpg"
     }
-    # Google Sheet'ten eklenenleri de alalım
+    # Google Sheet'ten eklenenleri de al
     db_urunler = verileri_getir("Urunler")
     for u in db_urunler:
         sabitler[u["Urun Adi"]] = u["Resim Dosya Adi"]
     return sabitler
 
 GUNCEL_URUNLER = get_urun_resimleri()
+
+# --- MALİYET KAYDETME ---
+def maliyet_kaydet(veriler):
+    sh = get_sheet()
+    try: w = sh.worksheet("Maliyetler")
+    except: return "Maliyetler sayfası bulunamadı"
+    
+    tum_veriler = w.get_all_records()
+    df = pd.DataFrame(tum_veriler)
+    
+    yeni_satir = [
+        veriler.get("Görsel", ""), veriler.get("Ürün Kod", ""), veriler.get("Ürün Id", ""),
+        veriler.get("Tahta", 0), veriler.get("VERNİK", 0), veriler.get("YAKMA", 0),
+        veriler.get("BOYA", 0), veriler.get("MUSLUK", 0), veriler.get("BORU", 0),
+        veriler.get("HALAT", 0), veriler.get("Metal çubuk", 0), veriler.get("CAM", 0),
+        veriler.get("UĞUR KAR", 0), veriler.get("MALİYET", 0)
+    ]
+
+    try:
+        # Varsa Güncelle, Yoksa Ekle
+        if "Ürün Id" in df.columns:
+            row_idx = df.index[df['Ürün Id'] == veriler["Ürün Id"]].tolist()
+            if row_idx:
+                gspread_row = row_idx[0] + 2 
+                w.update(f"A{gspread_row}:N{gspread_row}", [yeni_satir])
+                return "GÜNCELLENDİ"
+        
+        w.append_row(yeni_satir)
+        return "EKLENDİ"
+    except Exception as e: return f"HATA: {e}"
 
 # --- PDF OLUŞTURMA ---
 def create_pdf(s, urun_dict):
@@ -264,29 +245,100 @@ elif menu == "📋 Sipariş Listesi":
                 pdf_data = create_pdf(sip, GUNCEL_URUNLER)
                 st.download_button("📥 İNDİR", pdf_data, f"Siparis_{s_no}.pdf", "application/pdf", type="primary")
 
-# 3. RAPORLAR
+# 3. RAPORLAR (DÜZELTİLMİŞ HALİ)
 elif menu == "📊 Raporlar":
     st.header("Satış Raporları")
-    data = verileri_getir("Siparisler")
-    if data:
-        df = pd.DataFrame(data)
-        df['Tarih_dt'] = pd.to_datetime(df['Tarih'], format="%d.%m.%Y %H:%M", errors='coerce')
-        df['Tarih_gun'] = df['Tarih_dt'].dt.date
-        df['Tutar_float'] = df['Tutar'].apply(lambda x: float(str(x).replace('TL','').replace('.','').replace(',','.')) if x else 0)
-        
-        c1, c2 = st.columns([1,2])
-        zaman = c2.selectbox("Dönem:", ["Bugün", "Dün", "Bu Ay", "Geçen Ay", "Tüm Zamanlar"])
-        bugun = simdi().date()
-        bas, bit = bugun, bugun
-        
-        if zaman == "Dün": bas = bugun - timedelta(days=1); bit = bas
-        elif zaman == "Bu Ay": bas = bugun.replace(day=1)
-        elif zaman == "Geçen Ay": bas = (bugun.replace(day=1) - timedelta(days=1)).replace(day=1); bit = bugun.replace(day=1) - timedelta(days=1)
-        elif zaman == "Tüm Zamanlar": bas = bugun - timedelta(days=3650)
-        
-        df_f = df[(df['Tarih_gun'] >= bas) & (df['Tarih_gun'] <= bit)]
-        st.metric("Toplam Ciro", f"{df_f['Tutar_float'].sum():,.2f} TL")
-        st.bar_chart(df_f['Ürün 1'].value_counts())
+    try:
+        raw_data = verileri_getir("Siparisler")
+        if raw_data:
+            df = pd.DataFrame(raw_data)
+            
+            # Veri Temizliği
+            df['Tarih'] = df['Tarih'].astype(str)
+            df['Tarih_dt'] = pd.to_datetime(df['Tarih'], format="%d.%m.%Y %H:%M", errors='coerce')
+            df['Tarih_gun'] = df['Tarih_dt'].dt.date
+            
+            def temizle_tutar(val):
+                try:
+                    val = str(val).replace('TL', '').replace(' ', '')
+                    if "," in val: val = val.replace('.', '').replace(',', '.') 
+                    return float(val)
+                except: return 0.0
+            df['Tutar_float'] = df['Tutar'].apply(temizle_tutar)
+
+            # Filtreler
+            f1, f2, f3 = st.columns([1, 1, 2])
+            with f1:
+                secilen_urunler = st.multiselect("Ürün Seçiniz:", list(GUNCEL_URUNLER.keys()))
+            with f2:
+                zaman_secimi = st.selectbox("Dönem:", ["Bugün", "Dün", "Bu Ay", "Geçen Ay", "Son 7 Gün", "Son 30 Gün", "Son 1 Yıl", "Tarih Aralığı Seç"])
+
+            # Tarih Mantığı
+            bugun = simdi().date()
+            bas, bit = bugun, bugun
+
+            if zaman_secimi == "Bugün": pass
+            elif zaman_secimi == "Dün": bas = bugun - timedelta(days=1); bit = bas
+            elif zaman_secimi == "Son 7 Gün": bas = bugun - timedelta(days=7)
+            elif zaman_secimi == "Son 30 Gün": bas = bugun - timedelta(days=30)
+            elif zaman_secimi == "Son 1 Yıl": bas = bugun - timedelta(days=365)
+            elif zaman_secimi == "Bu Ay": bas = bugun.replace(day=1)
+            elif zaman_secimi == "Geçen Ay":
+                bu_ay_ilk = bugun.replace(day=1)
+                gecen_ay_son = bu_ay_ilk - timedelta(days=1)
+                bas = gecen_ay_son.replace(day=1); bit = gecen_ay_son
+            elif zaman_secimi == "Tarih Aralığı Seç":
+                with f3:
+                    d_range = st.date_input("Aralık:", (bugun - timedelta(days=7), bugun))
+                    if len(d_range) == 2: bas, bit = d_range
+
+            # Filtreleme
+            df_f = df[(df['Tarih_gun'] >= bas) & (df['Tarih_gun'] <= bit)]
+            if secilen_urunler:
+                df_f = df_f[df_f['Ürün 1'].isin(secilen_urunler) | df_f['Ürün 2'].isin(secilen_urunler)]
+
+            # Gösterim
+            if not df_f.empty:
+                st.info(f"📅 Rapor: {bas.strftime('%d.%m.%Y')} - {bit.strftime('%d.%m.%Y')}")
+                
+                # Kartlar
+                top_ciro = df_f['Tutar_float'].sum()
+                top_sip = len(df_f)
+                
+                # Adet Hesaplama (Güvenli)
+                a1 = pd.to_numeric(df_f['Adet 1'], errors='coerce').fillna(0).sum()
+                a2 = pd.to_numeric(df_f['Adet 2'], errors='coerce').fillna(0).sum()
+                top_urun = a1 + a2
+
+                k1, k2, k3 = st.columns(3)
+                k1.metric("Toplam Ciro", f"{top_ciro:,.2f} TL")
+                k2.metric("Sipariş Sayısı", f"{top_sip}")
+                k3.metric("Satılan Ürün", f"{int(top_urun)}")
+
+                # Grafikler
+                g1, g2 = st.columns(2)
+                with g1:
+                    st.markdown("##### 🏆 Ürün Satış Adetleri")
+                    u1c = df_f['Ürün 1'].value_counts()
+                    u2c = df_f['Ürün 2'].value_counts()
+                    total = u1c.add(u2c, fill_value=0).sort_values(ascending=True)
+                    if '' in total.index: total = total.drop('')
+                    if not total.empty:
+                        fig = px.bar(x=total.values, y=total.index, orientation='h', labels={'x':'Adet','y':''})
+                        st.plotly_chart(fig, use_container_width=True)
+                
+                with g2:
+                    st.markdown("##### 📈 Zaman Grafiği")
+                    if not df_f.empty:
+                        df_grp = df_f.groupby('Tarih_gun')['Tutar_float'].sum().reset_index()
+                        fig2 = px.line(df_grp, x='Tarih_gun', y='Tutar_float', markers=True, labels={'Tarih_gun':'Tarih', 'Tutar_float':'Ciro'})
+                        st.plotly_chart(fig2, use_container_width=True)
+            else:
+                st.warning("Seçilen dönemde kayıt bulunamadı.")
+        else:
+            st.info("Veri yok.")
+    except Exception as e:
+        st.error(f"Hata: {e}")
 
 # 4. CARİ HESAPLAR
 elif menu == "💰 Cari Hesaplar":
@@ -316,95 +368,70 @@ elif menu == "💰 Cari Hesaplar":
                     alacak = sub[sub['islem_tipi'].astype(str).str.contains("ÖDEME")]['tutar'].sum()
                     st.metric("BAKİYE", f"{alacak - borc:,.2f} TL")
 
-# 5. MALİYET YÖNETİMİ (GÜNCELLENDİ: EKLEME/DÜZENLEME)
+# 5. MALİYET YÖNETİMİ
 elif menu == "📉 Maliyet Yönetimi":
     st.header("Ürün Maliyet Yönetimi")
-    
-    # Verileri Çek
     try:
         maliyet_data = verileri_getir("Maliyetler")
-        df_maliyet = pd.DataFrame(maliyet_data)
-    except:
-        df_maliyet = pd.DataFrame()
-        st.warning("Maliyet tablosu oluşturulmamış.")
+        df_m = pd.DataFrame(maliyet_data)
+    except: df_m = pd.DataFrame()
 
-    tab1, tab2 = st.tabs(["📋 Maliyet Listesi", "➕ Ekle / Güncelle"])
+    tab1, tab2 = st.tabs(["📋 Liste / Detay", "➕ Ekle / Güncelle"])
 
     with tab1:
-        if not df_maliyet.empty:
-            st.dataframe(df_maliyet, use_container_width=True)
-            
-            st.markdown("### 🔍 Detaylı İnceleme")
-            urun_listesi = df_maliyet["Ürün Id"].unique().tolist()
-            secili_urun = st.selectbox("Ürün Seçiniz:", ["Seçiniz..."] + urun_listesi)
-            
-            if secili_urun != "Seçiniz...":
-                detay = df_maliyet[df_maliyet["Ürün Id"] == secili_urun].iloc[0]
+        if not df_m.empty:
+            st.dataframe(df_m, use_container_width=True)
+            urunler = df_m["Ürün Id"].unique().tolist()
+            secili = st.selectbox("Detay Gör:", ["Seçiniz..."] + urunler)
+            if secili != "Seçiniz...":
+                detay = df_m[df_m["Ürün Id"] == secili].iloc[0]
                 c1, c2 = st.columns([1, 2])
-                with c1:
-                    st.metric("TOPLAM MALİYET", f"{detay['MALİYET']} TL")
-                    st.info(f"Kod: {detay['Ürün Kod']}")
-                with c2:
-                    # Sadece sayısal ve >0 olan kolonları göster
-                    bilesenler = {k: v for k, v in detay.items() if k not in ["Görsel", "Ürün Kod", "Ürün Id", "MALİYET"] and isinstance(v, (int, float)) and v > 0}
-                    st.table(pd.DataFrame(list(bilesenler.items()), columns=["Kalem", "Tutar"]))
+                c1.metric("TOPLAM MALİYET", f"{detay.get('MALİYET',0)} TL")
+                c1.info(f"Kod: {detay.get('Ürün Kod', '-')}")
+                # Sadece pozitif değerleri göster
+                items = {k: v for k, v in detay.items() if k not in ["Görsel", "Ürün Kod", "Ürün Id", "MALİYET"] and isinstance(v, (int, float)) and v > 0}
+                c2.table(pd.DataFrame(list(items.items()), columns=["Kalem", "Tutar"]))
 
     with tab2:
-        st.subheader("Maliyet Kartı Oluştur / Düzenle")
-        
-        # Ürün Seçimi veya Yeni Giriş
-        urun_secim_modu = st.radio("İşlem Türü:", ["Varolan Ürünü Güncelle", "Yeni Ürün Ekle"], horizontal=True)
-        
-        varsayilan = {}
-        
-        if urun_secim_modu == "Varolan Ürünü Güncelle" and not df_maliyet.empty:
-            secilecek_id = st.selectbox("Güncellenecek Ürün:", df_maliyet["Ürün Id"].unique())
-            # Seçilen ürünün verilerini getir
-            if secilecek_id:
-                varsayilan = df_maliyet[df_maliyet["Ürün Id"] == secilecek_id].iloc[0].to_dict()
+        st.subheader("Maliyet Kartı")
+        mod = st.radio("İşlem:", ["Güncelle", "Yeni Ekle"], horizontal=True)
+        vals = {}
+        if mod == "Güncelle" and not df_m.empty:
+            s_id = st.selectbox("Ürün Seç:", df_m["Ürün Id"].unique())
+            if s_id: vals = df_m[df_m["Ürün Id"] == s_id].iloc[0].to_dict()
         
         with st.form("maliyet_form"):
             c1, c2 = st.columns(2)
             with c1:
-                urun_id = st.text_input("Ürün Adı (ID)", value=varsayilan.get("Ürün Id", ""))
-                urun_kod = st.text_input("Ürün Kodu", value=varsayilan.get("Ürün Kod", ""))
-                
-                st.markdown("**Ahşap / Malzeme**")
-                tahta = st.number_input("Tahta", value=int(varsayilan.get("Tahta", 0)))
-                vernik = st.number_input("Vernik", value=int(varsayilan.get("VERNİK", 0)))
-                yakma = st.number_input("Yakma", value=int(varsayilan.get("YAKMA", 0)))
-                boya = st.number_input("Boya", value=int(varsayilan.get("BOYA", 0)))
-
+                u_id = st.text_input("Ürün Adı (ID)", value=vals.get("Ürün Id", ""))
+                u_kod = st.text_input("Ürün Kodu", value=vals.get("Ürün Kod", ""))
+                tahta = st.number_input("Tahta", value=int(vals.get("Tahta", 0)))
+                vernik = st.number_input("Vernik", value=int(vals.get("VERNİK", 0)))
+                yakma = st.number_input("Yakma", value=int(vals.get("YAKMA", 0)))
+                boya = st.number_input("Boya", value=int(vals.get("BOYA", 0)))
             with c2:
-                st.markdown("**Aksesuar / Ekipman**")
-                musluk = st.number_input("Musluk", value=int(varsayilan.get("MUSLUK", 0)))
-                boru = st.number_input("Boru", value=int(varsayilan.get("BORU", 0)))
-                halat = st.number_input("Halat", value=int(varsayilan.get("HALAT", 0)))
-                metal = st.number_input("Metal Çubuk", value=int(varsayilan.get("Metal çubuk", 0)))
-                cam = st.number_input("Cam", value=int(varsayilan.get("CAM", 0)))
-                ugur = st.number_input("Uğur Kar (İşçilik vb)", value=int(varsayilan.get("UĞUR KAR", 0)))
-
-            # Toplamı otomatik hesapla (göstermelik)
-            toplam = tahta + vernik + yakma + boya + musluk + boru + halat + metal + cam + ugur
-            st.success(f"Hesaplanan Maliyet: {toplam} TL")
+                musluk = st.number_input("Musluk", value=int(vals.get("MUSLUK", 0)))
+                boru = st.number_input("Boru", value=int(vals.get("BORU", 0)))
+                halat = st.number_input("Halat", value=int(vals.get("HALAT", 0)))
+                metal = st.number_input("Metal Çubuk", value=int(vals.get("Metal çubuk", 0)))
+                cam = st.number_input("Cam", value=int(vals.get("CAM", 0)))
+                ugur = st.number_input("Uğur Kar", value=int(vals.get("UĞUR KAR", 0)))
             
-            submit_maliyet = st.form_submit_button("KAYDET / GÜNCELLE")
+            toplam = tahta+vernik+yakma+boya+musluk+boru+halat+metal+cam+ugur
+            st.info(f"Hesaplanan: {toplam} TL")
             
-            if submit_maliyet:
-                if urun_id:
-                    veri_paketi = {
-                        "Ürün Id": urun_id, "Ürün Kod": urun_kod, "Görsel": GUNCEL_URUNLER.get(urun_id, ""),
-                        "Tahta": tahta, "VERNİK": vernik, "YAKMA": yakma, "BOYA": boya,
-                        "MUSLUK": musluk, "BORU": boru, "HALAT": halat, "Metal çubuk": metal,
-                        "CAM": cam, "UĞUR KAR": ugur, "MALİYET": toplam
-                    }
-                    sonuc = maliyet_kaydet(veri_paketi)
-                    if "HATA" in sonuc: st.error(sonuc)
-                    else: 
-                        st.success(f"Başarılı: {sonuc}")
-                        st.cache_resource.clear() # Cache temizle ki liste yenilensin
-                else:
-                    st.warning("Ürün Adı (ID) boş olamaz.")
+            if st.form_submit_button("KAYDET"):
+                veri = {
+                    "Ürün Id": u_id, "Ürün Kod": u_kod, "Görsel": GUNCEL_URUNLER.get(u_id, ""),
+                    "Tahta": tahta, "VERNİK": vernik, "YAKMA": yakma, "BOYA": boya,
+                    "MUSLUK": musluk, "BORU": boru, "HALAT": halat, "Metal çubuk": metal,
+                    "CAM": cam, "UĞUR KAR": ugur, "MALİYET": toplam
+                }
+                res = maliyet_kaydet(veri)
+                if "HATA" in res: st.error(res)
+                else: 
+                    st.success(res)
+                    st.cache_resource.clear()
 
 # 6. ÜRÜN YÖNETİMİ
 elif menu == "➕ Ürün Yönetimi":
