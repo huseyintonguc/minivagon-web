@@ -3,7 +3,7 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
-import pytz  # Saat dilimi için yeni kütüphane
+import pytz
 from fpdf import FPDF
 from PIL import Image
 import os
@@ -132,7 +132,7 @@ if menu == "📦 Sipariş Girişi":
     
     col1, col2 = st.columns([1, 2])
     
-    # --- SOL TARAFI FORM DIŞINA ALIYORUZ (CANLI GÜNCELLEME) ---
+    # --- FORM DIŞI ALAN (Görseller Canlı Değişsin) ---
     with col1:
         st.info("🛒 Ürün Bilgileri")
         u1 = st.selectbox("1. Ürün Seçimi", list(URUNLER.keys()))
@@ -158,7 +158,7 @@ if menu == "📦 Sipariş Girişi":
             a2 = st.number_input("2. Ürün Adet", 1, 100, 1, key="a2_inp")
             i2 = st.text_input("2. Ürün Özel İsim", key="i2_inp")
 
-    # --- SAĞ TARAFI FORM İÇİNE ALIYORUZ ---
+    # --- FORM İÇİ ALAN ---
     with col2:
         st.info("💳 Müşteri ve Finans")
         with st.form("siparis_form", clear_on_submit=True):
@@ -191,7 +191,6 @@ if menu == "📦 Sipariş Girişi":
                             try: yeni_no = int(pd.to_numeric(df_m['Siparis No'], errors='coerce').max()) + 1
                             except: pass
                     
-                    # TÜRKİYE SAATİ KULLANILIYOR
                     tarih = simdi().strftime("%d.%m.%Y %H:%M")
                     fatura_durum = "KESİLDİ" if fatura_kesildi else "KESİLMEDİ"
                     
@@ -202,23 +201,36 @@ if menu == "📦 Sipariş Girişi":
                 except Exception as e:
                     st.error(f"Hata oluştu: {e}")
 
-# --- 2. SİPARİŞ LİSTESİ ---
+# --- 2. SİPARİŞ LİSTESİ (GÜNCELLENDİ: SIRALAMA EKLENDİ) ---
 elif menu == "📋 Sipariş Listesi":
     st.header("Sipariş Geçmişi")
     try:
         data = verileri_getir("Siparisler")
         if data:
             df = pd.DataFrame(data)
+            
+            # --- SIRALAMA İŞLEMİ (YENİDEN ESKİYE) ---
+            if 'Siparis No' in df.columns:
+                # Sayıya çevir ve sırala
+                df['Siparis No'] = pd.to_numeric(df['Siparis No'], errors='coerce')
+                df = df.sort_values(by="Siparis No", ascending=False)
+            
+            # Arama ve Filtreleme
             col1, col2 = st.columns([3, 1])
             arama = col1.text_input("İsim veya Sipariş No Ara")
             if arama:
                 df = df[df.astype(str).apply(lambda x: x.str.contains(arama, case=False)).any(axis=1)]
             
             st.dataframe(df, use_container_width=True, hide_index=True)
+            
             st.divider()
-            if 'Siparis No' in df.columns:
-                secenekler = df.apply(lambda x: f"{x['Siparis No']} - {x['Müşteri']}", axis=1)
+            
+            # FİŞ YAZDIRMA (ARTIK OTOMATİK EN ÜSTTEKİ SEÇİLİ GELİR)
+            if 'Siparis No' in df.columns and not df.empty:
+                # Sıralanmış dataframe'den listeyi oluşturuyoruz
+                secenekler = df.apply(lambda x: f"{int(x['Siparis No'])} - {x['Müşteri']}", axis=1)
                 secilen = st.selectbox("Fiş Yazdır:", secenekler)
+                
                 if st.button("📄 FİŞ OLUŞTUR"):
                     s_no = int(secilen.split(" - ")[0])
                     sip = df[df['Siparis No'] == s_no].iloc[0].to_dict()
@@ -242,7 +254,6 @@ elif menu == "💰 Cari Hesaplar":
                 c_tip = st.selectbox("İşlem", ["FATURA (Borç)", "ÖDEME (Alacak)"])
                 c_desc = st.text_input("Açıklama / Fatura No")
                 c_tutar = st.number_input("Tutar", min_value=0.0, format="%.2f")
-                # Cari tarihini de düzelttik
                 if st.form_submit_button("KAYDET"):
                     tarih = simdi().strftime("%d.%m.%Y")
                     cari_islem_ekle([c_ad, tarih, c_tip, c_desc, c_tutar])
