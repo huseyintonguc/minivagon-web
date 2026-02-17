@@ -34,33 +34,38 @@ def get_sheet():
     client = get_client()
     return client.open(SHEET_ADI)
 
-# --- GÜVENLİ SAYI DÖNÜŞTÜRME (ULTRA GÜVENLİ) ---
-def safe_int(val):
-    try:
-        if pd.isna(val) or str(val).strip() == "": return 0
-        return int(float(str(val).replace(",", ".")))
-    except: return 0
-
+# --- AKILLI PARA ÇEVİRİCİ (YENİ) ---
 def safe_float(val):
-    """Excel'den gelen her türlü garip para formatını düzeltir."""
+    """Kullanıcının girdiği her türlü para formatını (51.805,20 veya 1200.50) doğru sayıya çevirir."""
     try:
         if pd.isna(val) or str(val).strip() == "": return 0.0
-        # Eğer zaten sayıysa direkt döndür
-        if isinstance(val, (int, float)): return float(val)
-        
-        # Metin temizliği
         val_str = str(val).replace("TL", "").replace("tl", "").strip()
         
-        # Türkçe format (1.250,50) mı yoksa Düz format (1250.50) mı?
-        if "," in val_str:
-            # Noktaları sil (binlik ayırıcı), Virgülü noktaya çevir (kuruş)
-            val_str = val_str.replace(".", "").replace(",", ".")
+        # Eğer hem nokta hem virgül varsa (Örn: 1.250,50 veya 1,250.50)
+        if "." in val_str and "," in val_str:
+            last_dot = val_str.rfind(".")
+            last_comma = val_str.rfind(",")
+            # Son ayraç virgülsü (Türkçe: 1.250,50) -> Noktayı sil, virgülü nokta yap
+            if last_comma > last_dot:
+                val_str = val_str.replace(".", "").replace(",", ".")
+            # Son ayraç nokta ise (İngilizce: 1,250.50) -> Virgülü sil
+            else:
+                val_str = val_str.replace(",", "")
         
+        # Sadece virgül varsa (1250,50) -> Noktaya çevir
+        elif "," in val_str:
+            val_str = val_str.replace(",", ".")
+            
         return float(val_str)
     except: return 0.0
 
+def safe_int(val):
+    try:
+        return int(safe_float(val))
+    except: return 0
+
 # --- VERİ İŞLEMLERİ (CACHING) ---
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=10)
 def verileri_getir(sayfa_adi):
     sh = get_sheet()
     try:
@@ -316,7 +321,7 @@ if menu == "📦 Sipariş Girişi":
         st.info("💳 Müşteri ve Finans")
         with st.form("siparis"):
             c1, c2 = st.columns(2)
-            tutar = c1.text_input("Tutar (TL)")
+            tutar_inp = c1.text_input("Tutar (TL)")
             odeme = c2.selectbox("Ödeme", ["KAPIDA NAKİT", "KAPIDA K.KARTI", "HAVALE/EFT", "WEB SİTESİ"])
             c3, c4 = st.columns(2)
             kaynak = c3.selectbox("Kaynak", ["Instagram", "Web Sitesi", "Trendyol", "Whatsapp"])
@@ -340,6 +345,9 @@ if menu == "📦 Sipariş Girişi":
                             try: yeni_no = int(pd.to_numeric(df_m['Siparis No'], errors='coerce').max()) + 1
                             except: pass
                     tarih = simdi().strftime("%d.%m.%Y %H:%M")
+                    # Tutarın formatını düzelt
+                    tutar = safe_float(tutar_inp)
+                    
                     satir = [yeni_no, tarih, durum, ad, tel, tc, mail, u1, a1, i1, u2, a2, i2, tutar, odeme, kaynak, adres, notlar, fatura, tedarik]
                     siparis_ekle(satir)
                     st.success(f"✅ Sipariş #{yeni_no} Kaydedildi!")
@@ -513,14 +521,17 @@ elif menu == "💰 Cari Hesaplar":
             f_tarih = c2.date_input("Fatura Tarihi")
             f_no = c1.text_input("Fatura No")
             not_aciklama = c2.text_input("Not / Açıklama")
-            tutar = st.number_input("Tutar (KDV DAHİL)", min_value=0.0, format="%.2f")
+            # --- DÜZELTME: Text Input Kullanıldı ---
+            tutar_inp = st.text_input("Tutar (KDV DAHİL - Örn: 51.805,20)")
             islem_tipi = st.radio("İşlem Türü:", ["Fatura Girişi (BORÇ)", "Ödeme Yapıldı (ALACAK)"])
             if st.form_submit_button("KAYDET"):
                 if ad:
                     tarih_str = f_tarih.strftime("%d.%m.%Y")
                     tip_kisa = "BORÇ" if "BORÇ" in islem_tipi else "ALACAK"
-                    cari_islem_ekle([ad, tarih_str, f_no, not_aciklama, tutar, tip_kisa])
-                    st.success("Kaydedildi!")
+                    # Akıllı Çeviri
+                    tutar_val = safe_float(tutar_inp)
+                    cari_islem_ekle([ad, tarih_str, f_no, not_aciklama, tutar_val, tip_kisa])
+                    st.success(f"Kaydedildi! ({tutar_val:,.2f} TL)")
                     st.cache_resource.clear()
                     st.rerun()
                 else: st.warning("Cari adı boş olamaz.")
