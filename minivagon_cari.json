@@ -1,0 +1,26 @@
+[
+    {
+        "isim": "U\u011eUR KARAKAYA",
+        "bakiye": 0.0,
+        "hareketler": [
+            {
+                "tarih": "05.02.2026",
+                "tip": "FATURA",
+                "tutar": 27376.8,
+                "aciklama": "UGR2026000000035"
+            },
+            {
+                "tarih": "12.02.2026",
+                "tip": "FATURA",
+                "tutar": 51805.2,
+                "aciklama": "UGR2026000000039"
+            },
+            {
+                "tarih": "12.02.2026",
+                "tip": "ODEME",
+                "tutar": 79182.0,
+                "aciklama": "i\u015fcep havale"
+            }
+        ]
+    }
+]
