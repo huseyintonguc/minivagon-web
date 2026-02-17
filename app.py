@@ -2,12 +2,13 @@ import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 from fpdf import FPDF
 from PIL import Image
 import os
 import tempfile
+import plotly.express as px  # Grafik kütüphanesi
 
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="MiniVagon Bulut", page_icon="☁️", layout="wide")
@@ -16,7 +17,7 @@ st.set_page_config(page_title="MiniVagon Bulut", page_icon="☁️", layout="wid
 SHEET_ADI = "MiniVagonDB"
 RESIM_KLASORU = "resimler"
 
-# --- ZAMAN AYARI (TÜRKİYE) ---
+# --- ZAMAN AYARI ---
 def simdi():
     tz = pytz.timezone('Europe/Istanbul')
     return datetime.now(tz)
@@ -77,7 +78,6 @@ def create_pdf(s):
         if u_adi in URUNLER:
             dosya_adi = URUNLER[u_adi]
             full_path = os.path.join(RESIM_KLASORU, dosya_adi)
-            
             if os.path.exists(full_path):
                 try:
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
@@ -87,7 +87,6 @@ def create_pdf(s):
                         pdf.image(tmp.name, x=x_pos, y=40, h=60)
                 except: pass
 
-    # Resim Konumlandırma
     if s.get('Ürün 2'):
         resim_koy(s.get('Ürün 1'), 15)
         resim_koy(s.get('Ürün 2'), 110)
@@ -124,15 +123,16 @@ def create_pdf(s):
     return pdf.output(dest='S').encode('latin-1')
 
 # --- MENÜLER ---
-menu = st.sidebar.radio("Menü", ["📦 Sipariş Girişi", "📋 Sipariş Listesi", "💰 Cari Hesaplar"])
+menu = st.sidebar.radio("Menü", ["📦 Sipariş Girişi", "📋 Sipariş Listesi", "📊 Raporlar", "💰 Cari Hesaplar"])
 
-# --- 1. SİPARİŞ GİRİŞİ ---
+# -----------------------------------------------------------------------------
+# 1. SİPARİŞ GİRİŞİ
+# -----------------------------------------------------------------------------
 if menu == "📦 Sipariş Girişi":
     st.header("Yeni Sipariş Ekle")
     
     col1, col2 = st.columns([1, 2])
     
-    # --- FORM DIŞI ALAN (Görseller Canlı Değişsin) ---
     with col1:
         st.info("🛒 Ürün Bilgileri")
         u1 = st.selectbox("1. Ürün Seçimi", list(URUNLER.keys()))
@@ -145,10 +145,8 @@ if menu == "📦 Sipariş Girişi":
         i1 = st.text_input("1. Ürün Özel İsim (Varsa)")
         
         st.markdown("---")
-        
         ikinci_urun_aktif = st.checkbox("2. Ürün Ekle (+)")
         u2, a2, i2 = "", "", ""
-        
         if ikinci_urun_aktif:
             u2 = st.selectbox("2. Ürün Seçimi", list(URUNLER.keys()), key="u2_sel")
             if u2 in URUNLER:
@@ -158,7 +156,6 @@ if menu == "📦 Sipariş Girişi":
             a2 = st.number_input("2. Ürün Adet", 1, 100, 1, key="a2_inp")
             i2 = st.text_input("2. Ürün Özel İsim", key="i2_inp")
 
-    # --- FORM İÇİ ALAN ---
     with col2:
         st.info("💳 Müşteri ve Finans")
         with st.form("siparis_form", clear_on_submit=True):
@@ -193,7 +190,6 @@ if menu == "📦 Sipariş Girişi":
                     
                     tarih = simdi().strftime("%d.%m.%Y %H:%M")
                     fatura_durum = "KESİLDİ" if fatura_kesildi else "KESİLMEDİ"
-                    
                     satir = [yeni_no, tarih, durum, ad, tel, tc, mail, u1, a1, i1, u2, a2, i2, tutar, odeme, kaynak, adres, notlar, fatura_durum]
                     
                     siparis_ekle(satir)
@@ -201,7 +197,9 @@ if menu == "📦 Sipariş Girişi":
                 except Exception as e:
                     st.error(f"Hata oluştu: {e}")
 
-# --- 2. SİPARİŞ LİSTESİ (GÜNCELLENDİ: SIRALAMA EKLENDİ) ---
+# -----------------------------------------------------------------------------
+# 2. SİPARİŞ LİSTESİ
+# -----------------------------------------------------------------------------
 elif menu == "📋 Sipariş Listesi":
     st.header("Sipariş Geçmişi")
     try:
@@ -209,13 +207,11 @@ elif menu == "📋 Sipariş Listesi":
         if data:
             df = pd.DataFrame(data)
             
-            # --- SIRALAMA İŞLEMİ (YENİDEN ESKİYE) ---
+            # Sıralama
             if 'Siparis No' in df.columns:
-                # Sayıya çevir ve sırala
                 df['Siparis No'] = pd.to_numeric(df['Siparis No'], errors='coerce')
                 df = df.sort_values(by="Siparis No", ascending=False)
             
-            # Arama ve Filtreleme
             col1, col2 = st.columns([3, 1])
             arama = col1.text_input("İsim veya Sipariş No Ara")
             if arama:
@@ -224,10 +220,8 @@ elif menu == "📋 Sipariş Listesi":
             st.dataframe(df, use_container_width=True, hide_index=True)
             
             st.divider()
-            
-            # FİŞ YAZDIRMA (ARTIK OTOMATİK EN ÜSTTEKİ SEÇİLİ GELİR)
+            # PDF (Otomatik en üstteki seçili)
             if 'Siparis No' in df.columns and not df.empty:
-                # Sıralanmış dataframe'den listeyi oluşturuyoruz
                 secenekler = df.apply(lambda x: f"{int(x['Siparis No'])} - {x['Müşteri']}", axis=1)
                 secilen = st.selectbox("Fiş Yazdır:", secenekler)
                 
@@ -241,7 +235,116 @@ elif menu == "📋 Sipariş Listesi":
     except Exception as e:
         st.error(f"Veri çekilemedi: {e}")
 
-# --- 3. CARİ HESAPLAR ---
+# -----------------------------------------------------------------------------
+# 3. RAPORLAR (YENİ EKLENDİ)
+# -----------------------------------------------------------------------------
+elif menu == "📊 Raporlar":
+    st.header("Detaylı Satış Raporları")
+    try:
+        raw_data = verileri_getir("Siparisler")
+        if raw_data:
+            df = pd.DataFrame(raw_data)
+            
+            # --- VERİ HAZIRLIĞI ---
+            # Tarih formatını düzeltme (String -> Datetime)
+            df['Tarih_dt'] = pd.to_datetime(df['Tarih'], format="%d.%m.%Y %H:%M", errors='coerce')
+            
+            # Tutar formatını düzeltme (String "1.250,50" -> Float 1250.50)
+            # Not: Kullanıcı girişi nasılsa ona göre temizlik
+            def temizle_tutar(val):
+                try:
+                    val = str(val).replace('TL', '').replace(' ', '')
+                    if "," in val: # Türkçe format (1.200,50)
+                        val = val.replace('.', '').replace(',', '.') 
+                    return float(val)
+                except:
+                    return 0.0
+            
+            df['Tutar_float'] = df['Tutar'].apply(temizle_tutar)
+            
+            # --- FİLTRE ALANI ---
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                st.subheader("Filtrele")
+                # Ürün Filtresi
+                tum_urunler = list(URUNLER.keys())
+                secilen_urunler = st.multiselect("Ürün Bazlı Rapor Al:", tum_urunler)
+                
+                # Eğer ürün seçildiyse veriyi daralt
+                if secilen_urunler:
+                    # Hem Ürün 1 hem Ürün 2'de arama yap
+                    mask = df['Ürün 1'].isin(secilen_urunler) | df['Ürün 2'].isin(secilen_urunler)
+                    df = df[mask]
+            
+            with col_f2:
+                # Zaman Aralığı Görünümü
+                zaman_modu = st.radio("Grafik Görünümü:", ["Günlük", "Aylık", "Yıllık"], horizontal=True)
+            
+            # --- KPI KARTLARI ---
+            st.divider()
+            toplam_ciro = df['Tutar_float'].sum()
+            toplam_siparis = len(df)
+            ortalama_sepet = toplam_ciro / toplam_siparis if toplam_siparis > 0 else 0
+            
+            k1, k2, k3 = st.columns(3)
+            k1.metric("Toplam Ciro", f"{toplam_ciro:,.2f} TL")
+            k2.metric("Toplam Sipariş", f"{toplam_siparis} Adet")
+            k3.metric("Ortalama Sepet", f"{ortalama_sepet:,.2f} TL")
+            
+            st.divider()
+            
+            # --- GRAFİK 1: ZAMAN ÇİZELGESİ ---
+            st.subheader(f"Zaman İçindeki Satış Trendi ({zaman_modu})")
+            
+            if not df.empty:
+                df_chart = df.copy()
+                df_chart.set_index('Tarih_dt', inplace=True)
+                
+                # Resample (Yeniden Örnekleme)
+                if zaman_modu == "Günlük":
+                    df_resampled = df_chart.resample('D')['Tutar_float'].sum().reset_index()
+                elif zaman_modu == "Aylık":
+                    df_resampled = df_chart.resample('ME')['Tutar_float'].sum().reset_index() # 'M' eski sürüm, 'ME' yeni
+                else: # Yıllık
+                    df_resampled = df_chart.resample('YE')['Tutar_float'].sum().reset_index()
+                
+                fig_line = px.line(df_resampled, x='Tarih_dt', y='Tutar_float', 
+                                   labels={'Tutar_float': 'Ciro (TL)', 'Tarih_dt': 'Tarih'},
+                                   title="Satış Trendi", markers=True)
+                st.plotly_chart(fig_line, use_container_width=True)
+            
+            # --- GRAFİK 2: EN ÇOK SATAN ÜRÜNLER ---
+            st.subheader("Ürün Performansı")
+            # Hem Ürün 1 hem Ürün 2 sütunlarını sayıyoruz
+            u1_counts = df['Ürün 1'].value_counts()
+            u2_counts = df['Ürün 2'].value_counts()
+            total_counts = u1_counts.add(u2_counts, fill_value=0).sort_values(ascending=False)
+            
+            # Boş olanları (None veya boş string) temizle
+            if '' in total_counts.index:
+                total_counts = total_counts.drop('')
+            
+            col_g1, col_g2 = st.columns(2)
+            
+            with col_g1:
+                fig_bar = px.bar(total_counts, x=total_counts.values, y=total_counts.index, orientation='h',
+                                 labels={'x': 'Satış Adedi', 'y': 'Ürün'}, title="En Çok Satanlar", color=total_counts.values)
+                st.plotly_chart(fig_bar, use_container_width=True)
+            
+            with col_g2:
+                # Ödeme Tipleri Pasta Grafiği
+                fig_pie = px.pie(df, names='Ödeme', title="Ödeme Yöntemi Dağılımı")
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+        else:
+            st.warning("Henüz analiz edilecek veri yok.")
+            
+    except Exception as e:
+        st.error(f"Rapor oluşturulurken hata: {e}")
+
+# -----------------------------------------------------------------------------
+# 4. CARİ HESAPLAR
+# -----------------------------------------------------------------------------
 elif menu == "💰 Cari Hesaplar":
     st.header("Cari Takip")
     try:
