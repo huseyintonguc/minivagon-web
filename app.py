@@ -52,7 +52,7 @@ def verileri_getir(sayfa_adi):
     w = sh.worksheet(sayfa_adi)
     return w.get_all_records()
 
-# --- PDF OLUŞTURMA ---
+# --- PDF OLUŞTURMA (DÜZELTİLDİ: Çift Resim Sorunu Giderildi) ---
 def create_pdf(s):
     pdf = FPDF()
     pdf.add_page()
@@ -66,12 +66,10 @@ def create_pdf(s):
     pdf.text(150, 15, f"Siparis No: #{s.get('Siparis No')}")
     pdf.text(150, 22, f"Tarih: {s.get('Tarih')}")
 
-    # Resim Ekleme
+    # Resim Ekleme Fonksiyonu
     def resim_koy(u_adi, x_pos):
         if u_adi in URUNLER:
-            # Büyük/Küçük harf duyarlılığı için dosya adını tam alalım
             dosya_adi = URUNLER[u_adi]
-            # Resim klasöründeki dosyayı ara (Linux uyumu için)
             full_path = os.path.join(RESIM_KLASORU, dosya_adi)
             
             if os.path.exists(full_path):
@@ -83,10 +81,14 @@ def create_pdf(s):
                         pdf.image(tmp.name, x=x_pos, y=40, h=60)
                 except: pass
 
-    resim_koy(s.get('Ürün 1'), 65)
+    # --- RESİM KONUMLANDIRMA MANTIĞI (DÜZELTİLDİ) ---
     if s.get('Ürün 2'):
+        # İki ürün varsa: Biri sola, biri sağa
         resim_koy(s.get('Ürün 1'), 15)
         resim_koy(s.get('Ürün 2'), 110)
+    else:
+        # Tek ürün varsa: Sadece ortaya
+        resim_koy(s.get('Ürün 1'), 65)
 
     # İçerik
     pdf.set_y(110); pdf.set_text_color(0, 0, 0); pdf.set_font_size(12)
@@ -120,20 +122,20 @@ def create_pdf(s):
 # --- MENÜLER ---
 menu = st.sidebar.radio("Menü", ["📦 Sipariş Girişi", "📋 Sipariş Listesi", "💰 Cari Hesaplar"])
 
-# --- 1. SİPARİŞ GİRİŞİ (DÜZELTİLDİ: Ürün Seçimi Form Dışında) ---
+# --- 1. SİPARİŞ GİRİŞİ ---
 if menu == "📦 Sipariş Girişi":
     st.header("Yeni Sipariş Ekle")
     
     col1, col2 = st.columns([1, 2])
     
-    # --- SOL TARAFI FORM DIŞINA ALIYORUZ (CANLI GÜNCELLEME İÇİN) ---
+    # --- FORM DIŞI ALAN (Görseller Canlı Değişsin) ---
     with col1:
         st.info("🛒 Ürün Bilgileri")
         
         # 1. ÜRÜN
         u1 = st.selectbox("1. Ürün Seçimi", list(URUNLER.keys()))
         
-        # Resim Göster (Anlık Çalışır)
+        # Resim 1
         if u1 in URUNLER:
             img_path1 = os.path.join(RESIM_KLASORU, URUNLER[u1])
             if os.path.exists(img_path1):
@@ -146,12 +148,13 @@ if menu == "📦 Sipariş Girişi":
         
         st.markdown("---")
         
-        # 2. ÜRÜN (Anlık Çalışır)
+        # 2. ÜRÜN
         ikinci_urun_aktif = st.checkbox("2. Ürün Ekle (+)")
         u2, a2, i2 = "", "", ""
         
         if ikinci_urun_aktif:
             u2 = st.selectbox("2. Ürün Seçimi", list(URUNLER.keys()), key="u2_sel")
+            # Resim 2
             if u2 in URUNLER:
                 img_path2 = os.path.join(RESIM_KLASORU, URUNLER[u2])
                 if os.path.exists(img_path2):
@@ -160,7 +163,7 @@ if menu == "📦 Sipariş Girişi":
             a2 = st.number_input("2. Ürün Adet", 1, 100, 1, key="a2_inp")
             i2 = st.text_input("2. Ürün Özel İsim", key="i2_inp")
 
-    # --- SAĞ TARAFI FORM İÇİNE ALIYORUZ (VERİ GİRİŞİ İÇİN) ---
+    # --- FORM İÇİ ALAN (Veri Girişi) ---
     with col2:
         st.info("💳 Müşteri ve Finans")
         with st.form("siparis_form", clear_on_submit=True):
@@ -181,7 +184,6 @@ if menu == "📦 Sipariş Girişi":
             notlar = st.text_input("Sipariş Notu")
             fatura_kesildi = st.checkbox("Faturası Kesildi")
             
-            # Kaydet Butonu
             submitted = st.form_submit_button("SİPARİŞİ KAYDET", type="primary")
             
             if submitted:
@@ -198,8 +200,7 @@ if menu == "📦 Sipariş Girişi":
                     tarih = datetime.now().strftime("%d.%m.%Y %H:%M")
                     fatura_durum = "KESİLDİ" if fatura_kesildi else "KESİLMEDİ"
                     
-                    # Sütunlar: Siparis No, Tarih, Durum, Müşteri, Telefon, TC No, Mail, Ürün 1, Adet 1, İsim 1, Ürün 2, Adet 2, İsim 2, Tutar, Ödeme, Kaynak, Adres, Not, Fatura Durumu
-                    # u1, a1, i1 gibi değerler FORM DIŞINDAN geliyor, onları direkt alıyoruz.
+                    # Google Sheets Satırı
                     satir = [yeni_no, tarih, durum, ad, tel, tc, mail, u1, a1, i1, u2, a2, i2, tutar, odeme, kaynak, adres, notlar, fatura_durum]
                     
                     siparis_ekle(satir)
@@ -224,12 +225,17 @@ elif menu == "📋 Sipariş Listesi":
             
             st.divider()
             if 'Siparis No' in df.columns:
-                secilen = st.selectbox("Fiş Yazdır:", df['Siparis No'].astype(str) + " - " + df['Müşteri'])
+                # PDF Seçim
+                secenekler = df.apply(lambda x: f"{x['Siparis No']} - {x['Müşteri']}", axis=1)
+                secilen = st.selectbox("Fiş Yazdır:", secenekler)
+                
                 if st.button("📄 FİŞ OLUŞTUR"):
                     s_no = int(secilen.split(" - ")[0])
                     sip = df[df['Siparis No'] == s_no].iloc[0].to_dict()
                     pdf_data = create_pdf(sip)
                     st.download_button("📥 İNDİR", pdf_data, f"Siparis_{s_no}.pdf", "application/pdf", type="primary")
+        else:
+            st.info("Kayıt bulunamadı.")
     except Exception as e:
         st.error(f"Veri çekilemedi: {e}")
 
@@ -257,20 +263,21 @@ elif menu == "💰 Cari Hesaplar":
         with c2:
             if data:
                 df = pd.DataFrame(data)
-                cariler = df['cari_adi'].unique() if 'cari_adi' in df.columns else []
-                secili = st.selectbox("Hesap Seçiniz:", cariler)
-                
-                if secili:
-                    sub_df = df[df['cari_adi'] == secili]
-                    st.table(sub_df)
+                if 'cari_adi' in df.columns:
+                    cariler = df['cari_adi'].unique()
+                    secili = st.selectbox("Hesap Seçiniz:", cariler)
                     
-                    borc = sub_df[sub_df['islem_tipi'].astype(str).str.contains("FATURA")]['tutar'].sum()
-                    alacak = sub_df[sub_df['islem_tipi'].astype(str).str.contains("ÖDEME")]['tutar'].sum()
-                    bakiye = alacak - borc
-                    
-                    k1, k2, k3 = st.columns(3)
-                    k1.metric("Toplam Borç", f"{borc:,.2f}")
-                    k2.metric("Toplam Ödeme", f"{alacak:,.2f}")
-                    k3.metric("BAKİYE", f"{bakiye:,.2f}", delta_color="normal")
+                    if secili:
+                        sub_df = df[df['cari_adi'] == secili]
+                        st.table(sub_df)
+                        
+                        borc = sub_df[sub_df['islem_tipi'].astype(str).str.contains("FATURA")]['tutar'].sum()
+                        alacak = sub_df[sub_df['islem_tipi'].astype(str).str.contains("ÖDEME")]['tutar'].sum()
+                        bakiye = alacak - borc
+                        
+                        k1, k2, k3 = st.columns(3)
+                        k1.metric("Toplam Borç", f"{borc:,.2f}")
+                        k2.metric("Toplam Ödeme", f"{alacak:,.2f}")
+                        k3.metric("BAKİYE", f"{bakiye:,.2f}", delta_color="normal")
     except Exception as e:
         st.error(f"Hata: {e}")
