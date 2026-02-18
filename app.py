@@ -45,17 +45,17 @@ def safe_float(val):
     """Excel'den gelen her türlü garip para formatını düzeltir."""
     try:
         if pd.isna(val) or str(val).strip() == "": return 0.0
-        # Eğer zaten sayıysa direkt döndür
         if isinstance(val, (int, float)): return float(val)
         
-        # Metin temizliği
         val_str = str(val).replace("TL", "").replace("tl", "").strip()
         
-        # Türkçe format (1.250,50) mı yoksa Düz format (1250.50) mı?
-        if "," in val_str:
-            # Noktaları sil (binlik ayırıcı), Virgülü noktaya çevir (kuruş)
+        # Eğer hem nokta hem virgül varsa (örn: 1.250,50)
+        if "." in val_str and "," in val_str:
             val_str = val_str.replace(".", "").replace(",", ".")
-        
+        # Sadece virgül varsa (örn: 1250,50)
+        elif "," in val_str:
+            val_str = val_str.replace(",", ".")
+            
         return float(val_str)
     except: return 0.0
 
@@ -604,3 +604,4 @@ elif menu == "➕ Ürün Yönetimi":
                 yeni_urun_resim_ekle(ad, dosya)
                 st.success("Eklendi!")
             else: st.warning("Eksik bilgi.")
+
