@@ -537,9 +537,6 @@ elif menu == "💰 Cari Hesaplar":
                 df['Tutar_float'] = df['Tutar'].apply(lambda x: safe_float(x))
                 sub = df[df['Cari Adı'] == secili].copy()
                 st.table(sub[["Tarih", "Fatura No", "Not", "Tutar", "Tip"]])
-                borc = sub[sub['Tip'].astype(str).str.contains("BORÇ")]['Tutar_float'].sum()
-                alacak = sub[sub['Tip'].astype(str).str.contains("ALACAK")]['Tutar_float'].sum()
-                st.metric("GÜNCEL BAKİYE (Alacak - Borç)", f"{alacak - borc:,.2f} TL", delta_color="normal")
         else: st.warning("Veriler yüklenemedi.")
     else: st.info("Henüz kayıt yok.")
 
@@ -609,6 +606,7 @@ elif menu == "➕ Ürün Yönetimi":
                 yeni_urun_resim_ekle(ad, dosya)
                 st.success("Eklendi!")
             else: st.warning("Eksik bilgi.")
+
 
 
 
