@@ -42,22 +42,52 @@ def safe_int(val):
     except: return 0
 
 def safe_float(val):
-    """Excel'den gelen her türlü garip para formatını düzeltir."""
+    """Excel'deki '27.376,80' formatını hatasız sayıya çevirir."""
     try:
         if pd.isna(val) or str(val).strip() == "": return 0.0
-        # Eğer zaten sayıysa direkt döndür
         if isinstance(val, (int, float)): return float(val)
         
-        # Metin temizliği
-        val_str = str(val).replace("TL", "").replace("tl", "").strip()
+        s = str(val).replace("TL", "").replace("tl", "").replace("₺", "").replace(" ", "").strip()
         
-        # Türkçe format (1.250,50) mı yoksa Düz format (1250.50) mı?
-        if "," in val_str:
-            # Noktaları sil (binlik ayırıcı), Virgülü noktaya çevir (kuruş)
-            val_str = val_str.replace(".", "").replace(",", ".")
+        # KRİTİK DÜZELTME: 
+        # Eğer hem nokta hem virgül varsa, nokta binlik ayracıdır, silinir.
+        if "." in s and "," in s:
+            s = s.replace(".", "").replace(",", ".")
+        # Eğer sadece virgül varsa, o kuruş ayracıdır.
+        elif "," in s:
+            s = s.replace(",", ".")
+        # Eğer sadece nokta varsa ve noktadan sonra 3 basamak varsa o binlik ayracıdır.
+        # Örn: 27.376 gibi.
         
-        return float(val_str)
-    except: return 0.0
+        return float(s)
+    except:
+        return 0.0
+
+# Cari Hesaplar Menüsü altındaki bakiye hesaplama kısmını da şu şekilde güncelleyin:
+if menu == "💰 Cari Hesaplar":
+    # ... (kodun üst kısmı aynı)
+    if secili:
+        sub = df_c[df_c['Cari Adı'] == secili].copy()
+        
+        # Her satırın tutarını tek tek güvenli şekilde sayıya çevir
+        sub['Mat_Tutar'] = sub['Tutar'].apply(safe_float)
+        
+        st.table(sub[["Tarih", "Fatura No", "Not", "Tutar", "Tip"]])
+        
+        # Hesaplama mantığını garantiye alalım
+        toplam_borc = sub[sub['Tip'] == "BORÇ"]['Mat_Tutar'].sum()
+        toplam_alacak = sub[sub['Tip'] == "ALACAK"]['Mat_Tutar'].sum()
+        
+        # Sizin istediğiniz (Alacak - Borç) mantığı:
+        guncel_bakiye = toplam_alacak - toplam_borc
+        
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Toplam Borç (Fatura Girişi)", format_para_tr(toplam_borc))
+        k2.metric("Toplam Alacak (Ödenen)", format_para_tr(toplam_alacak))
+        
+        st.divider()
+        # Bakiye sıfırın altındaysa (Borçluysanız) kırmızı, üstündeyse yeşil görünür
+        st.subheader(f"GÜNCEL BAKİYE: {format_para_tr(guncel_bakiye)}")
 
 # --- VERİ İŞLEMLERİ (CACHING) ---
 @st.cache_data(ttl=5)
@@ -604,3 +634,4 @@ elif menu == "➕ Ürün Yönetimi":
                 yeni_urun_resim_ekle(ad, dosya)
                 st.success("Eklendi!")
             else: st.warning("Eksik bilgi.")
+
