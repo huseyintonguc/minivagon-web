@@ -42,18 +42,23 @@ def safe_int(val):
     except: return 0
 
 def safe_float(val):
-    """Excel'den gelen veriye dokunmadan doğrudan sayıya çevirir."""
+    """Excel'den gelen veriyi bozmadan, doğrudan sayısal değere dönüştürür."""
     try:
+        # Boş veri kontrolü
         if pd.isna(val) or str(val).strip() == "": 
             return 0.0
-        # Eğer veri zaten sayıysa (int/float) olduğu gibi döndür
+        
+        # Veri zaten sayıysa (float/int) olduğu gibi döndür
         if isinstance(val, (int, float)): 
             return float(val)
-        # Metin ise sadece sayıya çevirmeyi dene, içindeki noktaya/virgüle dokunma
+        
+        # Metin ise: Sadece boşlukları temizle ve sayıya çevir.
+        # Nokta silme veya TL temizleme işlemi yapılmaz; Excel formatı korunur.
         return float(str(val).strip())
-    except:
-        # Eğer Excel'de 1.250,50 gibi metin tabanlı Türkçe format varsa float() hata verir.
-        # Bu durumda sadece en temel temizliği yap:
+        
+    except (ValueError, TypeError):
+        # Eğer Excel'de 1.250,50 gibi virgüllü bir format varsa, 
+        # sadece virgülü noktaya çevirerek float'a zorla.
         try:
             return float(str(val).replace(",", "."))
         except:
@@ -604,6 +609,7 @@ elif menu == "➕ Ürün Yönetimi":
                 yeni_urun_resim_ekle(ad, dosya)
                 st.success("Eklendi!")
             else: st.warning("Eksik bilgi.")
+
 
 
 
