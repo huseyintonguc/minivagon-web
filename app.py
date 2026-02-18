@@ -42,22 +42,33 @@ def safe_int(val):
     except: return 0
 
 def safe_float(val):
-    """Excel'den gelen her türlü garip para formatını düzeltir."""
+    """Excel'den gelen para formatlarını (1.250,50 veya 1250.50) hatasız dönüştürür."""
     try:
         if pd.isna(val) or str(val).strip() == "": return 0.0
         if isinstance(val, (int, float)): return float(val)
         
+        # Temizlik: TL ibaresi ve boşlukları at
         val_str = str(val).replace("TL", "").replace("tl", "").strip()
         
-        # Eğer hem nokta hem virgül varsa (örn: 1.250,50)
+        # Eğer hem nokta hem virgül varsa (Örn: 1.250,50)
         if "." in val_str and "," in val_str:
+            # Nokta binlik ayırıcıdır -> sil | Virgül ondalıktır -> noktaya çevir
             val_str = val_str.replace(".", "").replace(",", ".")
-        # Sadece virgül varsa (örn: 1250,50)
+        
+        # Eğer sadece VİRGÜL varsa (Örn: 1250,50)
         elif "," in val_str:
             val_str = val_str.replace(",", ".")
             
+        # Eğer sadece NOKTA varsa (Örn: 150.00 veya 1.250)
+        # Burada en sondaki noktadan sonra 2 basamak varsa ondalık kabul etmeliyiz
+        elif "." in val_str:
+            parts = val_str.split(".")
+            if len(parts[-1]) > 2: # Noktadan sonra 3+ basamak varsa binlik ayırıcıdır
+                val_str = val_str.replace(".", "")
+        
         return float(val_str)
-    except: return 0.0
+    except:
+        return 0.0
 
 # --- VERİ İŞLEMLERİ (CACHING) ---
 @st.cache_data(ttl=5)
@@ -604,4 +615,5 @@ elif menu == "➕ Ürün Yönetimi":
                 yeni_urun_resim_ekle(ad, dosya)
                 st.success("Eklendi!")
             else: st.warning("Eksik bilgi.")
+
 
