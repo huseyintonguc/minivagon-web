@@ -62,7 +62,6 @@ def safe_float(val):
         return float(s)
     except:
         return 0.0
-
 # Cari Hesaplar Menüsü altındaki bakiye hesaplama kısmını da şu şekilde güncelleyin:
 if menu == "💰 Cari Hesaplar":
     # ... (kodun üst kısmı aynı)
@@ -634,4 +633,5 @@ elif menu == "➕ Ürün Yönetimi":
                 yeni_urun_resim_ekle(ad, dosya)
                 st.success("Eklendi!")
             else: st.warning("Eksik bilgi.")
+
 
