@@ -278,10 +278,15 @@ def create_pdf(s, urun_dict):
     pdf.set_y(110); pdf.set_text_color(0, 0, 0); pdf.set_font_size(12)
     def tr(t): return str(t).replace("ğ","g").replace("Ğ","G").replace("ş","s").replace("Ş","S").replace("İ","I").replace("ı","i").encode('latin-1','replace').decode('latin-1') if t else ""
     pdf.set_fill_color(240, 240, 240); pdf.cell(0, 10, "  URUN DETAYLARI", ln=1, fill=True); pdf.ln(2)
-    ek1 = f" - Isim: {s.get('İsim 1')}" if s.get('İsim 1') else ""
-    pdf.cell(0, 8, tr(f"1) {s.get('Ürün 1')} ({s.get('Adet 1')} Adet){ek1}"), ln=1)
-    if s.get('Ürün 2'): ek2 = f" - Isim: {s.get('İsim 2')}" if s.get('İsim 2') else ""; pdf.cell(0, 8, tr(f"2) {s.get('Ürün 2')} ({s.get('Adet 2')} Adet){ek2}"), ln=1)
-    pdf.ln(5)
+  # Mevcut satırlar (yaklaşık 195-200. satırlar arası)
+ek1 = f" - Isim: {s.get('İsim 1')}" if s.get('İsim 1') else ""
+# tr() fonksiyonunu isim değişkenlerinden kaldırıyoruz:
+pdf.cell(0, 8, tr(f"1) {s.get('Ürün 1')} ({s.get('Adet 1')} Adet)") + ek1, ln=1)
+
+if s.get('Ürün 2'):
+    ek2 = f" - Isim: {s.get('İsim 2')}" if s.get('İsim 2') else ""
+    # Burada da tr() fonksiyonunu ürün adı için kullanıp, isim (ek2) için kullanmıyoruz:
+    pdf.cell(0, 8, tr(f"2) {s.get('Ürün 2')} ({s.get('Adet 2')} Adet)") + ek2, ln=1)
     if "KAPIDA" in str(s.get('Ödeme')):
         pdf.set_fill_color(255, 230, 100); pdf.rect(10, pdf.get_y(), 190, 25, 'F'); pdf.set_xy(12, pdf.get_y()+2)
         pdf.cell(0, 10, tr(f"ODEME: {s.get('Ödeme')}"), ln=1); pdf.set_text_color(200, 0, 0); pdf.set_font_size(16)
@@ -606,6 +611,7 @@ elif menu == "➕ Ürün Yönetimi":
                 yeni_urun_resim_ekle(ad, dosya)
                 st.success("Eklendi!")
             else: st.warning("Eksik bilgi.")
+
 
 
 
