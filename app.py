@@ -9,6 +9,8 @@ from PIL import Image
 import os
 import tempfile
 import plotly.express as px
+import requests
+import base64
 
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="MiniVagon Bulut", page_icon="☁️", layout="wide")
@@ -21,6 +23,107 @@ RESIM_KLASORU = "resimler"
 def simdi():
     tz = pytz.timezone('Europe/Istanbul')
     return datetime.now(tz)
+
+# --- TRENDYOL API BAĞLANTISI ---
+def fetch_trendyol_orders():
+    try:
+        if "trendyol" not in st.secrets:
+            return None, "st.secrets içinde [trendyol] ayarı bulunamadı."
+
+        trendyol_secrets = st.secrets["trendyol"]
+        supplier_id = trendyol_secrets.get("supplier_id")
+        api_key = trendyol_secrets.get("api_key")
+        api_secret = trendyol_secrets.get("api_secret")
+
+        if not supplier_id or not api_key or not api_secret:
+            return None, "Trendyol API bilgileri (supplier_id, api_key, api_secret) st.secrets içinde eksik!"
+
+        auth_str = f"{api_key}:{api_secret}"
+        b64_auth_str = base64.b64encode(auth_str.encode()).decode()
+
+        url = f"https://api.trendyol.com/sapigw/suppliers/{supplier_id}/orders?status=Created,Picking"
+        headers = {
+            "Authorization": f"Basic {b64_auth_str}",
+            "User-Agent": f"{supplier_id} - MiniVagonApp"
+        }
+
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json().get("content", []), "BAŞARILI"
+        else:
+            return None, f"Trendyol Hatası: {response.status_code} - {response.text}"
+    except Exception as e:
+        return None, f"Sistem Hatası: {str(e)}"
+
+def format_trendyol_orders(orders, existing_db_df):
+    """Trendyol siparişlerini sisteme uygun formata (Siparisler sayfasına) dönüştürür."""
+    formatted_list = []
+
+    # Mevcut siparişleri kontrol etmek için kaynak sipariş ID'lerini alalım
+    existing_order_notes = []
+    if existing_db_df is not None and not existing_db_df.empty and 'Not' in existing_db_df.columns:
+        existing_order_notes = existing_db_df['Not'].astype(str).tolist()
+
+    # Yeni eklenecekler için tahmini başlangıç numarası
+    yeni_no = 1000
+    if existing_db_df is not None and not existing_db_df.empty and 'Siparis No' in existing_db_df.columns:
+        try:
+            yeni_no = int(pd.to_numeric(existing_db_df['Siparis No'], errors='coerce').max()) + 1
+        except:
+            pass
+
+    for order in orders:
+        ty_order_no = str(order.get('orderNumber'))
+
+        if ty_order_no in existing_order_notes:
+            continue
+
+        ship_addr = order.get('shipmentAddress', {})
+        musteri_adi = f"{ship_addr.get('firstName', '')} {ship_addr.get('lastName', '')}".strip()
+        tel = ship_addr.get('phone', '')
+        adres = ship_addr.get('fullAddress', '')
+        tc = order.get('invoiceAddress', {}).get('tcIdentityNumber', '')
+        mail = order.get('customerEmail', '')
+
+        tarih_ms = order.get('orderDate', 0)
+        tarih = simdi().strftime("%d.%m.%Y %H:%M")
+        if tarih_ms > 0:
+            try:
+                tarih = datetime.fromtimestamp(tarih_ms/1000).strftime("%d.%m.%Y %H:%M")
+            except: pass
+
+        lines = order.get('lines', [])
+
+        u1, a1, i1 = "", 0, ""
+        u2, a2, i2 = "", 0, ""
+        toplam_tutar = order.get('totalPrice', 0)
+
+        if len(lines) > 0:
+            u1 = lines[0].get('productName', '')
+            a1 = lines[0].get('quantity', 0)
+        if len(lines) > 1:
+            u2 = lines[1].get('productName', '')
+            a2 = lines[1].get('quantity', 0)
+        if len(lines) > 2:
+            i1 = "Trendyol panelinden kontrol ediniz (3+ ürün)"
+
+        durum = "YENİ SİPARİŞ"
+        odeme = "TRENDYOL"
+        kaynak = "Trendyol"
+        fatura = "KESİLMEDİ"
+        tedarik = "BEKLİYOR"
+        not_alani = ty_order_no
+
+        satir = [
+            yeni_no, tarih, durum, musteri_adi, tel, tc, mail,
+            u1, a1, i1, u2, a2, i2, toplam_tutar, odeme, kaynak,
+            adres, not_alani, fatura, tedarik
+        ]
+
+        formatted_list.append(satir)
+        yeni_no += 1
+
+    return formatted_list
 
 # --- GOOGLE SHEETS BAĞLANTISI ---
 @st.cache_resource
@@ -353,9 +456,45 @@ if menu == "📦 Sipariş Girişi":
 # 2. SİPARİŞ LİSTESİ
 elif menu == "📋 Sipariş Listesi":
     st.header("Sipariş Geçmişi")
+
+    col_header1, col_header2 = st.columns([2, 1])
+    with col_header2:
+        if st.button("🔄 Trendyol Siparişlerini Çek", use_container_width=True):
+            st.session_state["ty_cekildi"] = True
+
     data = verileri_getir("Siparisler")
+    df = pd.DataFrame(data) if data else pd.DataFrame()
+
+    if st.session_state.get("ty_cekildi", False):
+        with st.expander("📦 Trendyol'dan Çekilen Yeni Siparişler", expanded=True):
+            with st.spinner("Trendyol'dan siparişler çekiliyor..."):
+                ty_orders, msg = fetch_trendyol_orders()
+
+            if ty_orders is not None:
+                yeni_siparis_satirlari = format_trendyol_orders(ty_orders, df if not df.empty else None)
+                if not yeni_siparis_satirlari:
+                    st.info("Yeni bir Trendyol siparişi bulunamadı (Hepsi zaten sistemde olabilir).")
+                else:
+                    st.success(f"{len(yeni_siparis_satirlari)} adet yeni Trendyol siparişi bulundu!")
+
+                    df_yeni = pd.DataFrame(yeni_siparis_satirlari, columns=["Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Not","Fatura Durumu","Tedarik Durumu"])
+                    st.dataframe(df_yeni[["Siparis No", "Müşteri", "Ürün 1", "Adet 1", "Tutar", "Tarih"]], use_container_width=True)
+
+                    if st.button("✅ Listeyi Sisteme (Siparişler Tablosuna) Kaydet", type="primary"):
+                        try:
+                            for satir in yeni_siparis_satirlari:
+                                siparis_ekle(satir)
+                            st.success("Tüm yeni siparişler sisteme kaydedildi!")
+                            st.session_state["ty_cekildi"] = False
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Kaydedilirken hata oluştu: {e}")
+            else:
+                st.error(msg)
+
+    st.markdown("---")
+
     if data:
-        df = pd.DataFrame(data)
         if 'Siparis No' in df.columns:
             df['Siparis No'] = pd.to_numeric(df['Siparis No'], errors='coerce')
             df = df.sort_values(by="Siparis No", ascending=False)
