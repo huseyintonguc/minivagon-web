@@ -25,7 +25,7 @@ def simdi():
     return datetime.now(tz)
 
 # --- TRENDYOL API BAĞLANTISI ---
-def fetch_trendyol_orders():
+def fetch_trendyol_orders(start_date_ms=None, end_date_ms=None, status=None):
     try:
         if "trendyol" not in st.secrets:
             return None, "st.secrets içinde [trendyol] ayarı bulunamadı."
@@ -41,11 +41,30 @@ def fetch_trendyol_orders():
         auth_str = f"{api_key}:{api_secret}"
         b64_auth_str = base64.b64encode(auth_str.encode()).decode()
 
-        url = f"https://api.trendyol.com/sapigw/suppliers/{supplier_id}/orders?status=Created,Picking"
+        url = f"https://api.trendyol.com/sapigw/suppliers/{supplier_id}/orders"
+        params = []
+        if start_date_ms and end_date_ms:
+            params.append(f"startDate={int(start_date_ms)}&endDate={int(end_date_ms)}")
+        if status:
+            params.append(f"status={status}")
+        else:
+            params.append("status=Created,Picking,Invoiced,Shipped,Cancelled,Delivered,UnDelivered,Returned,Repack,UnPacked,UnSupplied")
+
+        if params:
+            url += "?" + "&".join(params)
+
         headers = {
             "Authorization": f"Basic {b64_auth_str}",
             "User-Agent": f"{supplier_id} - MiniVagonApp"
         }
+
+        # Trendyol API can return multiple pages. For simplicity and avoiding timeouts we fetch up to size=200
+        # If the user has thousands of orders in the selected period, this should be paginated,
+        # but 200 per page is the default max, so let's set size=200 to fetch as many as possible per call.
+        if "?" in url:
+            url += "&size=200"
+        else:
+            url += "?size=200"
 
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
@@ -56,21 +75,14 @@ def fetch_trendyol_orders():
         return None, f"Sistem Hatası: {str(e)}"
 
 def format_trendyol_orders(orders, existing_db_df):
-    """Trendyol siparişlerini sisteme uygun formata (Siparisler sayfasına) dönüştürür."""
+    """Trendyol siparişlerini sisteme uygun formata (PazaryeriSiparisleri sayfasına) dönüştürür."""
     formatted_list = []
 
     # Mevcut siparişleri kontrol etmek için kaynak sipariş ID'lerini alalım
+    # Pazaryeri Siparis No kolonunda trendyol order numarasını tutacağız.
     existing_order_notes = []
-    if existing_db_df is not None and not existing_db_df.empty and 'Not' in existing_db_df.columns:
-        existing_order_notes = existing_db_df['Not'].astype(str).tolist()
-
-    # Yeni eklenecekler için tahmini başlangıç numarası
-    yeni_no = 1000
-    if existing_db_df is not None and not existing_db_df.empty and 'Siparis No' in existing_db_df.columns:
-        try:
-            yeni_no = int(pd.to_numeric(existing_db_df['Siparis No'], errors='coerce').max()) + 1
-        except:
-            pass
+    if existing_db_df is not None and not existing_db_df.empty and 'Pazaryeri Siparis No' in existing_db_df.columns:
+        existing_order_notes = existing_db_df['Pazaryeri Siparis No'].astype(str).tolist()
 
     for order in orders:
         ty_order_no = str(order.get('orderNumber'))
@@ -107,21 +119,33 @@ def format_trendyol_orders(orders, existing_db_df):
         if len(lines) > 2:
             i1 = "Trendyol panelinden kontrol ediniz (3+ ürün)"
 
-        durum = "YENİ SİPARİŞ"
+        # Trendyol API'deki statüye göre bizim sistem statüsünü eşleştirme
+        ty_status = order.get('status', '')
+        durum_map = {
+            "Created": "YENİ SİPARİŞ",
+            "Picking": "YENİ SİPARİŞ",
+            "Shipped": "KARGOLANDI",
+            "Delivered": "TESLİM EDİLDİ",
+            "Cancelled": "İPTAL",
+            "Returned": "İADE",
+            "UnDelivered": "TESLİM EDİLEMEDİ"
+        }
+        durum = durum_map.get(ty_status, "YENİ SİPARİŞ")
+
         odeme = "TRENDYOL"
         kaynak = "Trendyol"
         fatura = "KESİLMEDİ"
         tedarik = "BEKLİYOR"
-        not_alani = ty_order_no
+        kargo_takip = order.get('cargoTrackingNumber', '')
 
+        # ["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu"]
         satir = [
-            yeni_no, tarih, durum, musteri_adi, tel, tc, mail,
+            ty_order_no, tarih, durum, musteri_adi, tel, tc, mail,
             u1, a1, i1, u2, a2, i2, toplam_tutar, odeme, kaynak,
-            adres, not_alani, fatura, tedarik
+            adres, kargo_takip, fatura, tedarik
         ]
 
         formatted_list.append(satir)
-        yeni_no += 1
 
     return formatted_list
 
@@ -190,6 +214,15 @@ def siparis_ekle(satir):
         w.append_row(["Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Not","Fatura Durumu","Tedarik Durumu"])
     w.append_row(satir)
     cache_temizle()
+def pazaryeri_siparis_ekle(satir):
+    sh = get_sheet()
+    try: w = sh.worksheet("PazaryeriSiparisleri")
+    except:
+        w = sh.add_worksheet(title="PazaryeriSiparisleri", rows=100, cols=20)
+        w.append_row(["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu"])
+    w.append_row(satir)
+    cache_temizle()
+
 
 def cari_islem_ekle(satir):
     # satir formatı: [Cari Adı, Tarih, Fatura No, Not, Tutar, Tip]
@@ -457,60 +490,117 @@ if menu == "📦 Sipariş Girişi":
 elif menu == "📋 Sipariş Listesi":
     st.header("Sipariş Geçmişi")
 
-    col_header1, col_header2 = st.columns([2, 1])
-    with col_header2:
-        if st.button("🔄 Trendyol Siparişlerini Çek", use_container_width=True):
-            st.session_state["ty_cekildi"] = True
+    tab_manuel, tab_pazaryeri = st.tabs(["✍️ Manuel Siparişler", "🌐 Pazaryeri Siparişleri"])
 
-    data = verileri_getir("Siparisler")
-    df = pd.DataFrame(data) if data else pd.DataFrame()
+    with tab_manuel:
+        st.subheader("Sisteme Girilen Manuel Siparişler")
+        data = verileri_getir("Siparisler")
+        df = pd.DataFrame(data) if data else pd.DataFrame()
 
-    if st.session_state.get("ty_cekildi", False):
-        with st.expander("📦 Trendyol'dan Çekilen Yeni Siparişler", expanded=True):
-            with st.spinner("Trendyol'dan siparişler çekiliyor..."):
-                ty_orders, msg = fetch_trendyol_orders()
+        if not df.empty:
+            if 'Siparis No' in df.columns:
+                df['Siparis No'] = pd.to_numeric(df['Siparis No'], errors='coerce')
+                df = df.sort_values(by="Siparis No", ascending=False)
 
-            if ty_orders is not None:
-                yeni_siparis_satirlari = format_trendyol_orders(ty_orders, df if not df.empty else None)
-                if not yeni_siparis_satirlari:
-                    st.info("Yeni bir Trendyol siparişi bulunamadı (Hepsi zaten sistemde olabilir).")
-                else:
-                    st.success(f"{len(yeni_siparis_satirlari)} adet yeni Trendyol siparişi bulundu!")
+            col1, col2 = st.columns([3, 1])
+            arama = col1.text_input("Arama", key="manuel_arama")
+            if arama: df = df[df.astype(str).apply(lambda x: x.str.contains(arama, case=False)).any(axis=1)]
 
-                    df_yeni = pd.DataFrame(yeni_siparis_satirlari, columns=["Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Not","Fatura Durumu","Tedarik Durumu"])
-                    st.dataframe(df_yeni[["Siparis No", "Müşteri", "Ürün 1", "Adet 1", "Tutar", "Tarih"]], use_container_width=True)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.divider()
 
-                    if st.button("✅ Listeyi Sisteme (Siparişler Tablosuna) Kaydet", type="primary"):
-                        try:
-                            for satir in yeni_siparis_satirlari:
-                                siparis_ekle(satir)
-                            st.success("Tüm yeni siparişler sisteme kaydedildi!")
-                            st.session_state["ty_cekildi"] = False
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Kaydedilirken hata oluştu: {e}")
-            else:
-                st.error(msg)
+            if 'Siparis No' in df.columns and not df.empty:
+                secenekler = df.apply(lambda x: f"{int(x['Siparis No'])} - {x['Müşteri']}", axis=1)
+                secilen = st.selectbox("Fiş Yazdır:", secenekler, key="manuel_fis")
+                if st.button("📄 FİŞ OLUŞTUR", key="btn_manuel_fis"):
+                    s_no = int(secilen.split(" - ")[0])
+                    sip = df[df['Siparis No'] == s_no].iloc[0].to_dict()
+                    pdf_data = create_pdf(sip, GUNCEL_URUNLER)
+                    st.download_button("📥 İNDİR", pdf_data, f"Siparis_{s_no}.pdf", "application/pdf", type="primary", key="dl_manuel_fis")
+        else:
+            st.info("Henüz manuel sipariş kaydı bulunmuyor.")
 
-    st.markdown("---")
+    with tab_pazaryeri:
+        st.subheader("Trendyol ve Diğer Pazaryeri Siparişleri")
 
-    if data:
-        if 'Siparis No' in df.columns:
-            df['Siparis No'] = pd.to_numeric(df['Siparis No'], errors='coerce')
-            df = df.sort_values(by="Siparis No", ascending=False)
-        col1, col2 = st.columns([3, 1])
-        arama = col1.text_input("Arama")
-        if arama: df = df[df.astype(str).apply(lambda x: x.str.contains(arama, case=False)).any(axis=1)]
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        st.divider()
-        if 'Siparis No' in df.columns and not df.empty:
-            secenekler = df.apply(lambda x: f"{int(x['Siparis No'])} - {x['Müşteri']}", axis=1)
-            secilen = st.selectbox("Fiş Yazdır:", secenekler)
-            if st.button("📄 FİŞ OLUŞTUR"):
-                s_no = int(secilen.split(" - ")[0])
-                sip = df[df['Siparis No'] == s_no].iloc[0].to_dict()
-                pdf_data = create_pdf(sip, GUNCEL_URUNLER)
-                st.download_button("📥 İNDİR", pdf_data, f"Siparis_{s_no}.pdf", "application/pdf", type="primary")
+        c_p1, c_p2 = st.columns([2, 1])
+        with c_p2:
+            if st.button("🔄 Trendyol Siparişlerini Çek", use_container_width=True):
+                st.session_state["ty_cekildi"] = True
+
+        data_pz = verileri_getir("PazaryeriSiparisleri")
+        df_pz = pd.DataFrame(data_pz) if data_pz else pd.DataFrame()
+
+        if st.session_state.get("ty_cekildi", False):
+            with st.expander("📦 Trendyol'dan Çekilen Yeni Siparişler", expanded=True):
+
+                # Geçmiş siparişleri çekmek için tarih seçici
+                c_d1, c_d2 = st.columns(2)
+                bas_tarih = c_d1.date_input("Başlangıç Tarihi", simdi().date() - timedelta(days=7))
+                bit_tarih = c_d2.date_input("Bitiş Tarihi", simdi().date())
+
+                if st.button("Siparişleri Getir"):
+                    with st.spinner("Trendyol'dan siparişler çekiliyor..."):
+                        # Trendyol API requires ms timestamps
+                        bas_ms = int(datetime.combine(bas_tarih, datetime.min.time()).timestamp() * 1000)
+                        # Make end date the very end of the selected day
+                        bit_ms = int(datetime.combine(bit_tarih, datetime.max.time()).timestamp() * 1000)
+
+                        ty_orders, msg = fetch_trendyol_orders(start_date_ms=bas_ms, end_date_ms=bit_ms)
+                        st.session_state["ty_orders_temp"] = ty_orders
+                        st.session_state["ty_msg_temp"] = msg
+
+                ty_orders = st.session_state.get("ty_orders_temp")
+                msg = st.session_state.get("ty_msg_temp")
+
+                if ty_orders is not None:
+                    yeni_siparis_satirlari = format_trendyol_orders(ty_orders, df_pz if not df_pz.empty else None)
+                    if not yeni_siparis_satirlari:
+                        st.info("Yeni bir Trendyol siparişi bulunamadı (Hepsi zaten sistemde olabilir).")
+                    else:
+                        st.success(f"{len(yeni_siparis_satirlari)} adet yeni Trendyol siparişi bulundu!")
+
+                        df_yeni = pd.DataFrame(yeni_siparis_satirlari, columns=["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu"])
+                        st.dataframe(df_yeni[["Pazaryeri Siparis No", "Müşteri", "Ürün 1", "Adet 1", "Tutar", "Tarih", "Durum"]], use_container_width=True)
+
+                        if st.button("✅ Listeyi Pazaryeri Tablosuna Kaydet", type="primary"):
+                            try:
+                                for satir in yeni_siparis_satirlari:
+                                    pazaryeri_siparis_ekle(satir)
+                                st.success("Tüm yeni siparişler Pazaryeri veritabanına kaydedildi!")
+                                st.session_state["ty_cekildi"] = False
+                                if "ty_orders_temp" in st.session_state:
+                                    del st.session_state["ty_orders_temp"]
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Kaydedilirken hata oluştu: {e}")
+                elif msg:
+                    st.error(msg)
+
+        st.markdown("---")
+
+        if not df_pz.empty:
+            df_pz = df_pz.sort_values(by="Tarih", ascending=False)
+
+            arama_pz = st.text_input("Pazaryeri Siparişlerinde Ara", key="pz_arama")
+            if arama_pz:
+                df_pz = df_pz[df_pz.astype(str).apply(lambda x: x.str.contains(arama_pz, case=False)).any(axis=1)]
+
+            st.dataframe(df_pz, use_container_width=True, hide_index=True)
+            st.divider()
+
+            if 'Pazaryeri Siparis No' in df_pz.columns and not df_pz.empty:
+                secenekler_pz = df_pz.apply(lambda x: f"{x['Pazaryeri Siparis No']} - {x['Müşteri']}", axis=1)
+                secilen_pz = st.selectbox("Fiş Yazdır:", secenekler_pz, key="pz_fis")
+                if st.button("📄 FİŞ OLUŞTUR", key="btn_pz_fis"):
+                    s_no_pz = secilen_pz.split(" - ")[0]
+                    sip_pz = df_pz[df_pz['Pazaryeri Siparis No'].astype(str) == s_no_pz].iloc[0].to_dict()
+                    # PDF fonksiyonu Siparis No bekliyor olabilir, geçici olarak ekleyelim
+                    sip_pz['Siparis No'] = sip_pz.get('Pazaryeri Siparis No', '')
+                    pdf_data_pz = create_pdf(sip_pz, GUNCEL_URUNLER)
+                    st.download_button("📥 İNDİR", pdf_data_pz, f"PazaryeriSiparis_{s_no_pz}.pdf", "application/pdf", type="primary", key="dl_pz_fis")
+        else:
+            st.info("Pazaryeri veritabanında henüz kayıt bulunmuyor.")
 
 # 3. FATURA TAKİBİ
 elif menu == "🧾 Fatura Takibi":
