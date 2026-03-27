@@ -223,6 +223,18 @@ def pazaryeri_siparis_ekle(satir):
     w.append_row(satir)
     cache_temizle()
 
+def pazaryeri_siparis_toplu_ekle(satirlar):
+    if not satirlar: return
+    sh = get_sheet()
+    try: w = sh.worksheet("PazaryeriSiparisleri")
+    except:
+        w = sh.add_worksheet(title="PazaryeriSiparisleri", rows=max(100, len(satirlar) + 1), cols=20)
+        w.append_row(["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu"])
+
+    # Tüm satırları tek bir API isteğiyle (bulk) ekliyoruz. (value_input_option='USER_ENTERED' formatı korur)
+    w.append_rows(satirlar, value_input_option='USER_ENTERED')
+    cache_temizle()
+
 
 def cari_islem_ekle(satir):
     # satir formatı: [Cari Adı, Tarih, Fatura No, Not, Tutar, Tip]
@@ -565,9 +577,8 @@ elif menu == "📋 Sipariş Listesi":
 
                         if st.button("✅ Listeyi Pazaryeri Tablosuna Kaydet", type="primary"):
                             try:
-                                for satir in yeni_siparis_satirlari:
-                                    pazaryeri_siparis_ekle(satir)
-                                st.success("Tüm yeni siparişler Pazaryeri veritabanına kaydedildi!")
+                                pazaryeri_siparis_toplu_ekle(yeni_siparis_satirlari)
+                                st.success(f"{len(yeni_siparis_satirlari)} yeni sipariş Pazaryeri veritabanına başarıyla kaydedildi!")
                                 st.session_state["ty_cekildi"] = False
                                 if "ty_orders_temp" in st.session_state:
                                     del st.session_state["ty_orders_temp"]
