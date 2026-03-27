@@ -695,13 +695,34 @@ elif menu == "🧾 Alış ve Tedarik":
 # 5. RAPORLAR
 elif menu == "📊 Raporlar":
     st.header("Satış Raporları")
+
+    # Veri kaynağı seçimi
+    kaynak_secimi = st.radio("Hangi verileri görmek istersiniz?",
+                             ["Tümü (Manuel + Pazaryeri)", "Manuel Siparişler Sadece", "Pazaryeri Siparişleri Sadece"],
+                             horizontal=True)
+
     try:
-        raw_data = verileri_getir("Siparisler")
-        if raw_data:
-            df = pd.DataFrame(raw_data)
+        raw_manuel = verileri_getir("Siparisler") if "Manuel" in kaynak_secimi or "Tümü" in kaynak_secimi else []
+        raw_pazaryeri = verileri_getir("PazaryeriSiparisleri") if "Pazaryeri" in kaynak_secimi or "Tümü" in kaynak_secimi else []
+
+        df_manuel = pd.DataFrame(raw_manuel) if raw_manuel else pd.DataFrame()
+        df_pazaryeri = pd.DataFrame(raw_pazaryeri) if raw_pazaryeri else pd.DataFrame()
+
+        # Ortak bir DataFrame oluşturalım
+        df_list = []
+        if not df_manuel.empty:
+            df_manuel["Sipariş Türü"] = "Manuel"
+            df_list.append(df_manuel)
+        if not df_pazaryeri.empty:
+            df_pazaryeri["Sipariş Türü"] = "Pazaryeri"
+            df_list.append(df_pazaryeri)
+
+        if df_list:
+            df = pd.concat(df_list, ignore_index=True)
             df['Tarih_dt'] = pd.to_datetime(df['Tarih'], format="%d.%m.%Y %H:%M", errors='coerce')
             df['Tarih_gun'] = df['Tarih_dt'].dt.date
             df['Tutar_float'] = df['Tutar'].apply(lambda x: safe_float(x))
+
             f1, f2, f3 = st.columns([1, 1, 2])
             with f1: secilen_urunler = st.multiselect("Ürün Seçiniz:", list(GUNCEL_URUNLER.keys()))
             with f2: zaman_secimi = st.selectbox("Dönem:", ["Bugün", "Dün", "Bu Ay", "Geçen Ay", "Son 7 Gün", "Son 30 Gün", "Son 1 Yıl", "Tarih Aralığı Seç"])
@@ -736,7 +757,22 @@ elif menu == "📊 Raporlar":
                 with g2:
                     if not df_f.empty:
                         df_grp = df_f.groupby('Tarih_gun')['Tutar_float'].sum().reset_index()
-                        st.plotly_chart(px.line(df_grp, x='Tarih_gun', y='Tutar_float', markers=True), use_container_width=True)
+                        st.plotly_chart(px.line(df_grp, x='Tarih_gun', y='Tutar_float', markers=True, title='Günlük Ciro'), use_container_width=True)
+
+                # Eğer tümü seçiliyse, Sipariş Türü bazında pasta grafik veya bar da eklenebilir.
+                if "Tümü" in kaynak_secimi and "Sipariş Türü" in df_f.columns:
+                    st.divider()
+                    st.subheader("Sipariş Dağılımı")
+                    p1, p2 = st.columns(2)
+                    with p1:
+                        sip_tur_grp = df_f.groupby('Sipariş Türü')['Tutar_float'].sum().reset_index()
+                        if not sip_tur_grp.empty:
+                            st.plotly_chart(px.pie(sip_tur_grp, values='Tutar_float', names='Sipariş Türü', title='Ciro Dağılımı (TL)'), use_container_width=True)
+                    with p2:
+                        sip_adet_grp = df_f.groupby('Sipariş Türü').size().reset_index(name='Sipariş Adeti')
+                        if not sip_adet_grp.empty:
+                            st.plotly_chart(px.pie(sip_adet_grp, values='Sipariş Adeti', names='Sipariş Türü', title='Sipariş Adeti Dağılımı', hole=0.4), use_container_width=True)
+
             else: st.warning("Veri bulunamadı.")
         else: st.info("Veri yok.")
     except Exception as e: st.error(f"Hata: {e}")
