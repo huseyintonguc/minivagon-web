@@ -39,7 +39,7 @@ def trendyol_efatura_login():
             return None, "E-Fatura API bilgileri (email, password) eksik!"
             
         # Canlıya geçerken burası https://apigateway.trendyolecozum.com olacak
-        url = "https://stage-apigateway.trendyolefaturam.com/api/auth/signin"
+        url = "https://apigateway.trendyolecozum.com/api/auth/signin"
         payload = {
             "email": email,
             "password": password
@@ -73,7 +73,7 @@ def trendyol_efatura_login():
 def trendyol_efatura_kes(token, fatura_payload):
     """Token kullanarak Trendyol eArşiv API'sine fatura oluşturma isteği gönderir."""
     try:
-        url = "https://stage-apigateway.trendyolefaturam.com/api/invoice/documents/earchive"
+        url = "https://apigateway.trendyolecozum.com/api/invoice/documents/earchive"
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
