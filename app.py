@@ -404,8 +404,17 @@ def get_maliyet_dict():
 def create_pdf(s, urun_dict):
     pdf = FPDF()
     pdf.add_page()
-    try: pdf.add_font('ArialTR', '', 'arial.ttf', uni=True); pdf.set_font('ArialTR', '', 12)
-    except: pdf.set_font("Arial", size=12)
+    # Arial fontunun kalın, italik versiyonlarını da eklememiz gerekiyor (bold, italic için)
+    # Eğer font dosyaları yoksa fpdf hata vermez ama set_font('ArialTR', 'B') çalışmaz
+    # Bu yüzden sadece normal metin için ArialTR kullanıp, diğerleri için fpdf standart fontlarını kullanabilir veya hepsini ArialTR (normal) yapabiliriz
+    try: 
+        pdf.add_font('ArialTR', '', 'arial.ttf', uni=True)
+        pdf.add_font('ArialTR', 'B', 'arial.ttf', uni=True)
+        pdf.add_font('ArialTR', 'I', 'arial.ttf', uni=True)
+        pdf.set_font('ArialTR', '', 12)
+    except Exception as e: 
+        print("Font yuklenemedi:", e)
+        pdf.set_font("Arial", size=12)
     pdf.set_fill_color(40, 40, 40); pdf.rect(0, 0, 210, 30, 'F')
     pdf.set_text_color(255, 255, 255); pdf.set_font_size(20); pdf.text(10, 20, "MINIVAGON")
     pdf.set_font_size(10); pdf.set_text_color(200, 200, 200)
