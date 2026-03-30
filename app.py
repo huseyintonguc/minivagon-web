@@ -426,19 +426,62 @@ def create_pdf(s, urun_dict):
     pdf.set_y(110); pdf.set_text_color(0, 0, 0); pdf.set_font_size(12)
     def tr(t): return str(t).replace("ğ","g").replace("Ğ","G").replace("ş","s").replace("Ş","S").replace("İ","I").replace("ı","i").encode('latin-1','replace').decode('latin-1') if t else ""
     pdf.set_fill_color(240, 240, 240); pdf.cell(0, 10, "  URUN DETAYLARI", ln=1, fill=True); pdf.ln(2)
-    ek1 = f" - Isim: {s.get('İsim 1')}" if s.get('İsim 1') else ""
-    pdf.cell(0, 8, tr(f"1) {s.get('Ürün 1')} ({s.get('Adet 1')} Adet){ek1}"), ln=1)
-    if s.get('Ürün 2'): ek2 = f" - Isim: {s.get('İsim 2')}" if s.get('İsim 2') else ""; pdf.cell(0, 8, tr(f"2) {s.get('Ürün 2')} ({s.get('Adet 2')} Adet){ek2}"), ln=1)
+    
+    # ÜRÜN 1
+    pdf.set_font('ArialTR', 'B', 12) if 'ArialTR' in pdf.fonts else pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 8, tr(f"1) {s.get('Ürün 1')} ({s.get('Adet 1')} Adet)"), ln=1)
+    if s.get('İsim 1'):
+        pdf.set_font('ArialTR', 'I', 11) if 'ArialTR' in pdf.fonts else pdf.set_font('Arial', 'I', 11)
+        pdf.set_text_color(0, 102, 204) # Mavi renk
+        pdf.cell(10) # Girinti
+        pdf.cell(0, 8, tr(f">>> YAZILACAK ISIM: {s.get('İsim 1')} <<<"), ln=1)
+        pdf.set_text_color(0, 0, 0) # Rengi normale döndür
+        
+    # ÜRÜN 2
+    if s.get('Ürün 2'):
+        pdf.ln(2)
+        pdf.set_font('ArialTR', 'B', 12) if 'ArialTR' in pdf.fonts else pdf.set_font('Arial', 'B', 12)
+        pdf.cell(0, 8, tr(f"2) {s.get('Ürün 2')} ({s.get('Adet 2')} Adet)"), ln=1)
+        if s.get('İsim 2'):
+            pdf.set_font('ArialTR', 'I', 11) if 'ArialTR' in pdf.fonts else pdf.set_font('Arial', 'I', 11)
+            pdf.set_text_color(0, 102, 204)
+            pdf.cell(10)
+            pdf.cell(0, 8, tr(f">>> YAZILACAK ISIM: {s.get('İsim 2')} <<<"), ln=1)
+            pdf.set_text_color(0, 0, 0)
+
     pdf.ln(5)
-    if "KAPIDA" in str(s.get('Ödeme')):
+    pdf.set_font('ArialTR', '', 12) if 'ArialTR' in pdf.fonts else pdf.set_font('Arial', '', 12)
+    
+    odeme_turu = str(s.get('Ödeme', '')).upper()
+    if "KAPIDA" in odeme_turu:
         pdf.set_fill_color(255, 230, 100); pdf.rect(10, pdf.get_y(), 190, 25, 'F'); pdf.set_xy(12, pdf.get_y()+2)
-        pdf.cell(0, 10, tr(f"ODEME: {s.get('Ödeme')}"), ln=1); pdf.set_text_color(200, 0, 0); pdf.set_font_size(16)
-        pdf.cell(0, 10, tr(f"TAHSIL EDILECEK TUTAR: {s.get('Tutar')} TL"), ln=1); pdf.set_text_color(0, 0, 0); pdf.set_font_size(12); pdf.ln(5)
-    else: pdf.cell(0, 10, tr(f"Odeme: {s.get('Ödeme')} | Tutar: {s.get('Tutar')} TL"), ln=1); pdf.ln(5)
+        pdf.cell(0, 10, tr(f"ODEME TURU: {odeme_turu}"), ln=1); pdf.set_text_color(200, 0, 0)
+        pdf.set_font('ArialTR', 'B', 16) if 'ArialTR' in pdf.fonts else pdf.set_font('Arial', 'B', 16)
+        pdf.cell(0, 10, tr(f"TAHSIL EDILECEK TUTAR: {s.get('Tutar')} TL"), ln=1)
+        pdf.set_text_color(0, 0, 0); pdf.set_font('ArialTR', '', 12) if 'ArialTR' in pdf.fonts else pdf.set_font('Arial', '', 12); pdf.ln(5)
+    else:
+        # Ödemesi alınmış durumlarda yeşil arka plan ve mesaj
+        pdf.set_fill_color(200, 240, 200); pdf.rect(10, pdf.get_y(), 190, 25, 'F'); pdf.set_xy(12, pdf.get_y()+2)
+        pdf.cell(0, 10, tr(f"ODEME TURU: {odeme_turu} | Tutar: {s.get('Tutar')} TL"), ln=1)
+        pdf.set_text_color(0, 128, 0) # Yeşil renk
+        pdf.set_font('ArialTR', 'B', 16) if 'ArialTR' in pdf.fonts else pdf.set_font('Arial', 'B', 16)
+        pdf.cell(0, 10, tr("ODEMESI ALINDI - TAHSILAT YOK"), ln=1)
+        pdf.set_text_color(0, 0, 0); pdf.set_font('ArialTR', '', 12) if 'ArialTR' in pdf.fonts else pdf.set_font('Arial', '', 12); pdf.ln(5)
+        
     pdf.set_fill_color(240, 240, 240); pdf.cell(0, 10, "  MUSTERI BILGILERI", ln=1, fill=True); pdf.ln(2)
-    pdf.cell(0, 8, tr(f"Musteri: {s.get('Müşteri')}"), ln=1); pdf.cell(0, 8, tr(f"Telefon: {s.get('Telefon')}"), ln=1)
+    pdf.set_font('ArialTR', 'B', 12) if 'ArialTR' in pdf.fonts else pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 8, tr(f"Musteri: {s.get('Müşteri')}"), ln=1)
+    pdf.set_font('ArialTR', '', 12) if 'ArialTR' in pdf.fonts else pdf.set_font('Arial', '', 12)
+    pdf.cell(0, 8, tr(f"Telefon: {s.get('Telefon')}"), ln=1)
     pdf.multi_cell(0, 8, tr(f"Adres: {s.get('Adres')}"))
-    if s.get('Not'): pdf.multi_cell(0, 8, tr(f"NOT: {s.get('Not')}"))
+    if s.get('Not'): 
+        pdf.ln(2)
+        pdf.set_font('ArialTR', 'B', 12) if 'ArialTR' in pdf.fonts else pdf.set_font('Arial', 'B', 12)
+        pdf.set_text_color(200, 0, 0)
+        pdf.multi_cell(0, 8, tr(f"MUSTERI NOTU: {s.get('Not')}"))
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font('ArialTR', '', 12) if 'ArialTR' in pdf.fonts else pdf.set_font('Arial', '', 12)
+        
     return pdf.output(dest='S').encode('latin-1')
 
 # --- MENÜ ---
