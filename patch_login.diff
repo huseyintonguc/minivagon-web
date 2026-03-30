@@ -1,0 +1,33 @@
+--- app.py
++++ app.py
+@@ -10,6 +10,8 @@
+ from oauth2client.service_account import ServiceAccountCredentials
+ from fpdf import FPDF
+ import requests
++import json
++import base64
+
+ # --- SAYFA AYARLARI ---
+ st.set_page_config(page_title="MiniVagon Bulut", layout="wide")
+@@ -61,7 +63,20 @@
+                 # Tokenın başına "Bearer " eklenmiş mi kontrol edelim
+                 if not access_token.startswith("Bearer "):
+                     access_token = f"Bearer {access_token}"
+-                return access_token, "BAŞARILI"
++
++                # Tokenı decode edip userId ve companyId değerlerini bulalım
++                user_id, company_id = None, None
++                try:
++                    b64_part = access_token.split(".")[1]
++                    b64_part += "=" * ((4 - len(b64_part) % 4) % 4)
++                    payload_dict = json.loads(base64.b64decode(b64_part))
++                    user_id = payload_dict.get("sub")
++                    privs = payload_dict.get("privs", {})
++                    company_id = list(privs.keys())[0] if privs else None
++                except Exception as e:
++                    pass
++
++                return {"token": access_token, "user_id": user_id, "company_id": company_id}, "BAŞARILI"
+             else:
+                 return None, "Login başarılı fakat Token bulunamadı!"
+         else:

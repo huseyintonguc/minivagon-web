@@ -1,0 +1,10 @@
+--- app.py
++++ app.py
+@@ -11,6 +11,7 @@
+ import plotly.express as px
+ import requests
+ import base64
++import json
+
+ # --- SAYFA AYARLARI ---
+ st.set_page_config(page_title="MiniVagon Bulut", page_icon="☁️", layout="wide")
