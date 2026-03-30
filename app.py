@@ -213,9 +213,11 @@ def create_efatura_payload(siparis, user_id=None, company_id=None):
           "unitCode": "C62", # Adet
           "quantity": a1,
           "totalAmount": satir_vergisiz,
-          "taxAmount": satir_vergi,
-          "taxableAmount": satir_vergisiz,
-          "taxPercent": 20,
+          "totalTax": {
+              "totalTaxAmount": satir_vergi,
+              "taxableAmount": satir_vergisiz,
+              "taxPercent": 20
+          },
           "itemName": u1,
           "unitPriceAmount": birim_fiyat_kurus,
           "totalDiscountAmount": 0
@@ -229,9 +231,11 @@ def create_efatura_payload(siparis, user_id=None, company_id=None):
           "unitCode": "C62", # Adet
           "quantity": a2,
           "totalAmount": satir_vergisiz,
-          "taxAmount": satir_vergi,
-          "taxableAmount": satir_vergisiz,
-          "taxPercent": 20,
+          "totalTax": {
+              "totalTaxAmount": satir_vergi,
+              "taxableAmount": satir_vergisiz,
+              "taxPercent": 20
+          },
           "itemName": u2,
           "unitPriceAmount": birim_fiyat_kurus,
           "totalDiscountAmount": 0
