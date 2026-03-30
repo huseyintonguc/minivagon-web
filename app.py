@@ -179,7 +179,7 @@ def create_efatura_payload(siparis, user_id=None, company_id=None):
       },
       "invoiceLines": [],
       "totalTax": {
-        "taxAmount": vergi_kurus,
+        "totalTaxAmount": vergi_kurus,
         "taxableAmount": vergisiz_kurus
       },
       "invoiceTotal": {
