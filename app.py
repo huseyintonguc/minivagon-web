@@ -52,7 +52,7 @@ def trendyol_efatura_login():
         response = requests.post(url, json=payload, headers=headers)
         if response.status_code == 200:
             # Token header'da dönüyor (Dökümana göre)
-            access_token = response.headers.get("access-token") or response.headers.get("Authorization")
+            access_token = response.headers.get("x-access-token") or response.headers.get("access-token") or response.headers.get("Authorization")
             # Bazen body içinde de dönebilir
             if not access_token:
                 try: access_token = response.json().get("accessToken")
@@ -64,11 +64,7 @@ def trendyol_efatura_login():
                     access_token = f"Bearer {access_token}"
                 return access_token, "BAŞARILI"
             else:
-                debug_info = ""
-                try: debug_info = str(response.json())
-                except: debug_info = response.text
-                headers_info = str(response.headers)
-                return None, f"Login başarılı fakat Token bulunamadı! Headers: {headers_info} | Body: {debug_info}"
+                return None, "Login başarılı fakat Token bulunamadı!"
         else:
             return None, f"Giriş Hatası: {response.status_code} - {response.text}"
     except Exception as e:
