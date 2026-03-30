@@ -11,6 +11,8 @@ import tempfile
 import plotly.express as px
 import requests
 import base64
+import json
+import re
 
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="MiniVagon Bulut", page_icon="☁️", layout="wide")
@@ -29,14 +31,14 @@ def trendyol_efatura_login():
     """Trendyol E-Faturam API'sine login olur ve token döner."""
     try:
         if "efatura" not in st.secrets:
-            return None, "st.secrets içinde [efatura] ayarı bulunamadı."
+            return {}, "st.secrets içinde [efatura] ayarı bulunamadı."
             
         efatura_secrets = st.secrets["efatura"]
         email = efatura_secrets.get("email")
         password = efatura_secrets.get("password")
         
         if not email or not password:
-            return None, "E-Fatura API bilgileri (email, password) eksik!"
+            return {}, "E-Fatura API bilgileri (email, password) eksik!"
             
         # Canlıya geçerken burası https://apigateway.trendyolecozum.com olacak
         url = "https://apigateway.trendyolecozum.com/api/auth/signin"
@@ -62,9 +64,26 @@ def trendyol_efatura_login():
                 # Tokenın başına "Bearer " eklenmiş mi kontrol edelim
                 if not access_token.startswith("Bearer "):
                     access_token = f"Bearer {access_token}"
-                return access_token, "BAŞARILI"
+                
+                # Tokenı decode edip userId ve companyId değerlerini bulalım
+                user_id, company_id = None, None
+                try:
+                    b64_part = access_token.split(".")[1]
+                    b64_part += "=" * ((4 - len(b64_part) % 4) % 4)
+                    payload_dict = json.loads(base64.b64decode(b64_part))
+                    user_id = payload_dict.get("sub")
+                    privs = payload_dict.get("privs", {})
+                    company_id = list(privs.keys())[0] if privs else None
+                except Exception as e:
+                    pass
+
+                return {"token": access_token, "user_id": user_id, "company_id": company_id}, "BAŞARILI"
             else:
-                return None, "Login başarılı fakat Token bulunamadı!"
+                debug_info = ""
+                try: debug_info = str(response.json())
+                except: debug_info = response.text
+                headers_info = str(response.headers)
+                return None, f"Login başarılı fakat Token bulunamadı! Headers: {headers_info} | Body: {debug_info}"
         else:
             return None, f"Giriş Hatası: {response.status_code} - {response.text}"
     except Exception as e:
@@ -89,7 +108,7 @@ def trendyol_efatura_kes(token, fatura_payload):
     except Exception as e:
         return None, f"Sistem Hatası: {str(e)}"
 
-def create_efatura_payload(siparis):
+def create_efatura_payload(siparis, user_id=None, company_id=None):
     """Google Sheets'ten gelen siparişi Trendyol eArşiv API formatına çevirir."""
     # API kurallarına göre tutarlar kuruş cinsinden int olmalı (Örn: 100.50 TL -> 10050)
     
@@ -125,15 +144,22 @@ def create_efatura_payload(siparis):
         email = "noreply@minivagon.com"
         
     efatura_secrets = st.secrets.get("efatura", {})
-    company_id = efatura_secrets.get("company_id", 0) # Dökümanda companyId zorunlu alan
+    # Token'dan gelen company_id varsa onu kullan, yoksa secrets'dan al
+    company_id_val = safe_int(company_id) if company_id else safe_int(efatura_secrets.get("company_id", 0))
     satici_vkn = efatura_secrets.get("tax_id", "11111111111")
+    
+    # Telefon formatını düzelt (^\+?[0-9]{7,15}$)
+    tel = re.sub(r'[^0-9+]', '', tel)
+    if not tel or len(tel) < 7:
+        tel = "05555555555" # Geçersizse varsayılan değer
     
     # Adres parse (Çok basit, varsayılan değerlerle)
     tam_adres = str(siparis.get('Adres', 'Türkiye')).strip()
     
     payload = {
       "autoInvoiceId": True,
-      "companyId": safe_int(company_id),
+      "companyId": safe_int(company_id_val),
+      "userId": safe_int(user_id),
       "taxId": str(satici_vkn),
       "source": "PORTAL",
       "recipientInfo": {
@@ -152,7 +178,7 @@ def create_efatura_payload(siparis):
         "invoiceTypeCode": "SATIS"
       },
       "invoiceLines": [],
-      "taxes": {
+      "totalTax": {
         "taxAmount": vergi_kurus,
         "taxableAmount": vergisiz_kurus
       },
@@ -904,9 +930,10 @@ elif menu == "🧾 Fatura Takibi":
                                             siparis_nolar = [int(s.split(" - ")[0]) for s in secilen_faturalar]
                                             for sip_no in siparis_nolar:
                                                 siparis_satiri = bekleyenler[bekleyenler['Siparis No'] == sip_no].iloc[0].to_dict()
-                                                payload = create_efatura_payload(siparis_satiri)
+                                                # token artık bir dict dönüyor: {"token": "...", "user_id": "...", "company_id": "..."}
+                                                payload = create_efatura_payload(siparis_satiri, user_id=token.get("user_id"), company_id=token.get("company_id"))
                                                 
-                                                cevap, msj2 = trendyol_efatura_kes(token, payload)
+                                                cevap, msj2 = trendyol_efatura_kes(token.get("token"), payload)
                                                 if msj2 == "BAŞARILI":
                                                     basarili_nolar.append(sip_no)
                                                     st.success(f"#{sip_no} numaralı sipariş için e-fatura oluşturuldu!")
