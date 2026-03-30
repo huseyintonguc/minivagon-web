@@ -24,6 +24,195 @@ def simdi():
     tz = pytz.timezone('Europe/Istanbul')
     return datetime.now(tz)
 
+# --- TRENDYOL E-FATURA API BAĞLANTISI ---
+def trendyol_efatura_login():
+    """Trendyol E-Faturam API'sine login olur ve token döner."""
+    try:
+        if "efatura" not in st.secrets:
+            return None, "st.secrets içinde [efatura] ayarı bulunamadı."
+            
+        efatura_secrets = st.secrets["efatura"]
+        email = efatura_secrets.get("email")
+        password = efatura_secrets.get("password")
+        
+        if not email or not password:
+            return None, "E-Fatura API bilgileri (email, password) eksik!"
+            
+        # Canlıya geçerken burası https://apigateway.trendyolecozum.com olacak
+        url = "https://stage-apigateway.trendyolefaturam.com/api/auth/signin"
+        payload = {
+            "email": email,
+            "password": password
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+        
+        response = requests.post(url, json=payload, headers=headers)
+        if response.status_code == 200:
+            # Token header'da dönüyor (Dökümana göre)
+            access_token = response.headers.get("access-token") or response.headers.get("Authorization")
+            # Bazen body içinde de dönebilir
+            if not access_token:
+                try: access_token = response.json().get("accessToken")
+                except: pass
+                
+            if access_token:
+                # Tokenın başına "Bearer " eklenmiş mi kontrol edelim
+                if not access_token.startswith("Bearer "):
+                    access_token = f"Bearer {access_token}"
+                return access_token, "BAŞARILI"
+            else:
+                return None, "Login başarılı fakat Token bulunamadı!"
+        else:
+            return None, f"Giriş Hatası: {response.status_code} - {response.text}"
+    except Exception as e:
+        return None, f"Sistem Hatası: {str(e)}"
+
+def trendyol_efatura_kes(token, fatura_payload):
+    """Token kullanarak Trendyol eArşiv API'sine fatura oluşturma isteği gönderir."""
+    try:
+        url = "https://stage-apigateway.trendyolefaturam.com/api/invoice/documents/earchive"
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": token
+        }
+        
+        response = requests.post(url, json=fatura_payload, headers=headers)
+        if response.status_code in [200, 201]:
+            # Dönen yanıtı (Fatura Uuid vb.) okuyalım
+            return response.json(), "BAŞARILI"
+        else:
+            return None, f"Fatura Kesme Hatası: {response.status_code} - {response.text}"
+    except Exception as e:
+        return None, f"Sistem Hatası: {str(e)}"
+
+def create_efatura_payload(siparis):
+    """Google Sheets'ten gelen siparişi Trendyol eArşiv API formatına çevirir."""
+    # API kurallarına göre tutarlar kuruş cinsinden int olmalı (Örn: 100.50 TL -> 10050)
+    
+    tutar_tl = safe_float(siparis.get('Tutar', 0))
+    tutar_kurus = int(round(tutar_tl * 100))
+    
+    # %20 KDV varsayımıyla içyüzde hesaplama:
+    # Vergisiz = Tutar / 1.20
+    vergisiz_tl = tutar_tl / 1.20
+    vergi_tl = tutar_tl - vergisiz_tl
+    
+    vergisiz_kurus = int(round(vergisiz_tl * 100))
+    vergi_kurus = int(round(vergi_tl * 100))
+    
+    ad_soyad = str(siparis.get('Müşteri', '')).strip()
+    ad_parcalar = ad_soyad.split(" ")
+    if len(ad_parcalar) > 1:
+        ad = " ".join(ad_parcalar[:-1])
+        soyad = ad_parcalar[-1]
+    else:
+        ad = ad_soyad
+        soyad = "Müşteri"
+        
+    tc_no = str(siparis.get('TC No', '')).strip()
+    # TC Kimlik No 11 hane, VKN (Vergi Kimlik No) 10 hanedir. 
+    # Eğer 10 veya 11 hane değilse, varsayılan nihai tüketici (11111111111) kabul edilir.
+    if not tc_no or len(tc_no) not in [10, 11]:
+        tc_no = "11111111111" # Varsayılan Nihai Tüketici
+        
+    tel = str(siparis.get('Telefon', '')).strip()
+    email = str(siparis.get('Mail', '')).strip()
+    if not email:
+        email = "noreply@minivagon.com"
+        
+    efatura_secrets = st.secrets.get("efatura", {})
+    company_id = efatura_secrets.get("company_id", 0) # Dökümanda companyId zorunlu alan
+    satici_vkn = efatura_secrets.get("tax_id", "11111111111")
+    
+    # Adres parse (Çok basit, varsayılan değerlerle)
+    tam_adres = str(siparis.get('Adres', 'Türkiye')).strip()
+    
+    payload = {
+      "autoInvoiceId": True,
+      "companyId": safe_int(company_id),
+      "taxId": str(satici_vkn),
+      "source": "PORTAL",
+      "recipientInfo": {
+        "city": "Bilinmiyor",
+        "district": "Bilinmiyor",
+        "address": tam_adres,
+        "postalCode": "00000",
+        "phone": tel,
+        "email": email,
+        "taxId": tc_no,
+        "name": ad,
+        "surname": soyad
+      },
+      "invoiceInfo": {
+        "invoiceType": "EARSIVFATURA",
+        "invoiceTypeCode": "SATIS"
+      },
+      "invoiceLines": [],
+      "taxes": {
+        "taxAmount": vergi_kurus,
+        "taxableAmount": vergisiz_kurus
+      },
+      "invoiceTotal": {
+        "lineExtensionAmount": vergisiz_kurus,
+        "taxExclusiveAmount": vergisiz_kurus,
+        "taxInclusiveAmount": tutar_kurus,
+        "allowanceTotalAmount": 0,
+        "payableAmount": tutar_kurus
+      }
+    }
+    
+    # Satırları ekle
+    # Sipariş formatında 2 ürün olabilir
+    u1 = siparis.get('Ürün 1', '')
+    a1 = safe_int(siparis.get('Adet 1', 0))
+    u2 = siparis.get('Ürün 2', '')
+    a2 = safe_int(siparis.get('Adet 2', 0))
+    
+    toplam_adet = a1 + a2
+    if toplam_adet == 0: toplam_adet = 1
+    
+    # Ortalama birim fiyat (Karmaşık olmaması için toplam tutar ürün adedine bölünüyor)
+    birim_fiyat_tl = vergisiz_tl / toplam_adet
+    birim_fiyat_kurus = int(round(birim_fiyat_tl * 100))
+    
+    if u1 and a1 > 0:
+        satir_vergisiz = birim_fiyat_kurus * a1
+        satir_vergi = int(round((satir_vergisiz * 0.20)))
+        
+        payload["invoiceLines"].append({
+          "unitCode": "C62", # Adet
+          "quantity": a1,
+          "totalAmount": satir_vergisiz,
+          "taxAmount": satir_vergi,
+          "taxableAmount": satir_vergisiz,
+          "taxPercent": 20,
+          "itemName": u1,
+          "unitPriceAmount": birim_fiyat_kurus,
+          "totalDiscountAmount": 0
+        })
+        
+    if u2 and a2 > 0:
+        satir_vergisiz = birim_fiyat_kurus * a2
+        satir_vergi = int(round((satir_vergisiz * 0.20)))
+        
+        payload["invoiceLines"].append({
+          "unitCode": "C62", # Adet
+          "quantity": a2,
+          "totalAmount": satir_vergisiz,
+          "taxAmount": satir_vergi,
+          "taxableAmount": satir_vergisiz,
+          "taxPercent": 20,
+          "itemName": u2,
+          "unitPriceAmount": birim_fiyat_kurus,
+          "totalDiscountAmount": 0
+        })
+        
+    return payload
+
 # --- TRENDYOL API BAĞLANTISI ---
 def fetch_trendyol_orders(start_date_ms=None, end_date_ms=None, status=None):
     try:
@@ -693,15 +882,43 @@ elif menu == "🧾 Fatura Takibi":
                         st.metric("Bekleyen Tutar", f"{bekleyenler['Tutar_float'].sum():,.2f} TL")
                         st.dataframe(bekleyenler[["Siparis No", "Tarih", "Müşteri", "Tutar", "Fatura Durumu"]], use_container_width=True)
                         secenekler = bekleyenler.apply(lambda x: f"{x['Siparis No']} - {x['Müşteri']} ({x['Tutar']})", axis=1).tolist()
-                        secilen_faturalar = st.multiselect("Kesildi İşaretle:", secenekler)
-                        if st.button("ONAYLA"):
-                            if secilen_faturalar:
-                                siparis_nolar = [int(s.split(" - ")[0]) for s in secilen_faturalar]
-                                sonuc = fatura_durumunu_kesildi_yap(siparis_nolar)
-                                if sonuc == "BAŞARILI":
-                                    st.success("Güncellendi!")
-                                    st.rerun()
-                                else: st.error(sonuc)
+                        secilen_faturalar = st.multiselect("İşlem Yapılacak Siparişleri Seç:", secenekler)
+                        
+                        col_f1, col_f2 = st.columns(2)
+                        with col_f1:
+                            if st.button("Manuel Kesildi İşaretle", use_container_width=True):
+                                if secilen_faturalar:
+                                    siparis_nolar = [int(s.split(" - ")[0]) for s in secilen_faturalar]
+                                    sonuc = fatura_durumunu_kesildi_yap(siparis_nolar)
+                                    if sonuc == "BAŞARILI":
+                                        st.success("Güncellendi!")
+                                        st.rerun()
+                                    else: st.error(sonuc)
+                        with col_f2:
+                            if st.button("⚡ Trendyol E-Fatura Kes", type="primary", use_container_width=True):
+                                if secilen_faturalar:
+                                    with st.spinner("Trendyol E-Faturam API'sine bağlanılıyor..."):
+                                        token, msg = trendyol_efatura_login()
+                                        if token:
+                                            basarili_nolar = []
+                                            siparis_nolar = [int(s.split(" - ")[0]) for s in secilen_faturalar]
+                                            for sip_no in siparis_nolar:
+                                                siparis_satiri = bekleyenler[bekleyenler['Siparis No'] == sip_no].iloc[0].to_dict()
+                                                payload = create_efatura_payload(siparis_satiri)
+                                                
+                                                cevap, msj2 = trendyol_efatura_kes(token, payload)
+                                                if msj2 == "BAŞARILI":
+                                                    basarili_nolar.append(sip_no)
+                                                    st.success(f"#{sip_no} numaralı sipariş için e-fatura oluşturuldu!")
+                                                else:
+                                                    st.error(f"#{sip_no} Hatası: {msj2}")
+                                            
+                                            # Başarılı olanların durumunu "KESİLDİ" yap
+                                            if basarili_nolar:
+                                                fatura_durumunu_kesildi_yap(basarili_nolar)
+                                                st.info("Kayıtlar güncellendi.")
+                                        else:
+                                            st.error(msg)
                     else: st.success("Kesilecek fatura kalmadı.")
                 with tab2:
                     kesilenler = df[df["Fatura Durumu"] == "KESİLDİ"]
