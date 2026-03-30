@@ -64,7 +64,11 @@ def trendyol_efatura_login():
                     access_token = f"Bearer {access_token}"
                 return access_token, "BAŞARILI"
             else:
-                return None, "Login başarılı fakat Token bulunamadı!"
+                debug_info = ""
+                try: debug_info = str(response.json())
+                except: debug_info = response.text
+                headers_info = str(response.headers)
+                return None, f"Login başarılı fakat Token bulunamadı! Headers: {headers_info} | Body: {debug_info}"
         else:
             return None, f"Giriş Hatası: {response.status_code} - {response.text}"
     except Exception as e:
