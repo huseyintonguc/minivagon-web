@@ -887,7 +887,7 @@ elif menu == "📋 Sipariş Listesi":
                 secilen = st.selectbox("Fiş Yazdır:", secenekler, key="manuel_fis")
                 if st.button("📄 FİŞ OLUŞTUR", key="btn_manuel_fis"):
                     s_no = int(secilen.split(" - ")[0])
-                    sip = df[df['Siparis No'] == s_no].iloc[0].to_dict()
+                    sip = df[df['Siparis No'].astype(str) == str(s_no)].iloc[0].to_dict()
                     pdf_data = create_pdf(sip, GUNCEL_URUNLER)
                     st.download_button("📥 İNDİR", pdf_data, f"Siparis_{s_no}.pdf", "application/pdf", type="primary", key="dl_manuel_fis")
         else:
@@ -966,7 +966,7 @@ elif menu == "📋 Sipariş Listesi":
                 secilen_pz = st.selectbox("Fiş Yazdır:", secenekler_pz, key="pz_fis")
                 if st.button("📄 FİŞ OLUŞTUR", key="btn_pz_fis"):
                     s_no_pz = secilen_pz.split(" - ")[0]
-                    sip_pz = df_pz[df_pz['Pazaryeri Siparis No'].astype(str) == s_no_pz].iloc[0].to_dict()
+                    sip_pz = df_pz[df_pz['Pazaryeri Siparis No'].astype(str) == str(s_no_pz)].iloc[0].to_dict()
                     # PDF fonksiyonu Siparis No bekliyor olabilir, geçici olarak ekleyelim
                     sip_pz['Siparis No'] = sip_pz.get('Pazaryeri Siparis No', '')
                     pdf_data_pz = create_pdf(sip_pz, GUNCEL_URUNLER)
@@ -1012,7 +1012,7 @@ elif menu == "🧾 Fatura Takibi":
                                             basarili_nolar = []
                                             siparis_nolar = [int(s.split(" - ")[0]) for s in secilen_faturalar]
                                             for sip_no in siparis_nolar:
-                                                siparis_satiri = bekleyenler[bekleyenler['Siparis No'] == sip_no].iloc[0].to_dict()
+                                                siparis_satiri = bekleyenler[bekleyenler['Siparis No'].astype(str) == str(sip_no)].iloc[0].to_dict()
                                                 # token artık bir dict dönüyor: {"token": "...", "user_id": "...", "company_id": "..."}
                                                 payload = create_efatura_payload(siparis_satiri, user_id=token.get("user_id"), company_id=token.get("company_id"))
 
@@ -1228,7 +1228,7 @@ elif menu == "📉 Maliyet Yönetimi":
                 urunler = df_m["Ürün Id"].unique().tolist()
                 secili = st.selectbox("Detay Gör:", ["Seçiniz..."] + urunler)
                 if secili != "Seçiniz...":
-                    detay = df_m[df_m["Ürün Id"] == secili].iloc[0]
+                    detay = df_m[df_m["Ürün Id"].astype(str) == str(secili)].iloc[0]
                     c1, c2 = st.columns([1, 2])
                     c1.metric("TOPLAM MALİYET", f"{detay.get('MALİYET',0)} TL")
                     items = {k: v for k, v in detay.items() if k not in ["Görsel", "Ürün Kod", "Ürün Id", "MALİYET"] and isinstance(v, (int, float)) and v > 0}
@@ -1241,7 +1241,7 @@ elif menu == "📉 Maliyet Yönetimi":
         vals = {}
         if mod == "Güncelle" and not df_m.empty and "Ürün Id" in df_m.columns:
             s_id = st.selectbox("Ürün Seç:", df_m["Ürün Id"].unique())
-            if s_id: vals = df_m[df_m["Ürün Id"] == s_id].iloc[0].to_dict()
+            if s_id: vals = df_m[df_m["Ürün Id"].astype(str) == str(s_id)].iloc[0].to_dict()
         with st.form("maliyet_form"):
             c1, c2 = st.columns(2)
             with c1:
