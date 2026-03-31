@@ -444,10 +444,41 @@ def verileri_getir(sayfa_adi):
     sh = get_sheet()
     try:
         w = sh.worksheet(sayfa_adi)
-        return w.get_all_records()
+        # get_all_records fails if headers are missing or data length > header length
+        # Using get_all_values provides resilience against data schema changes
+        values = w.get_all_values()
+        if not values or len(values) < 2:
+            return []
+            
+        headers = values[0]
+        data = values[1:]
+        
+        # Pad headers if there's more data columns than header columns
+        max_cols = max(len(headers), max((len(row) for row in data), default=0))
+        if len(headers) < max_cols:
+            headers.extend([f"Sutun_{i+1}" for i in range(len(headers), max_cols)])
+            
+        # Ensure unique headers
+        unique_headers = []
+        for h in headers:
+            base_h = h if str(h).strip() else "BilinmeyenSutun"
+            new_h = base_h
+            counter = 1
+            while new_h in unique_headers:
+                new_h = f"{base_h}_{counter}"
+                counter += 1
+            unique_headers.append(new_h)
+            
+        import pandas as pd
+        df = pd.DataFrame(data, columns=unique_headers)
+        return df.to_dict('records')
+        
     except gspread.exceptions.WorksheetNotFound:
         return []
     except Exception as e:
+        import streamlit as st
+        # Hatanın sebebini konsola veya uyarıya yazdıralım ki bir daha sorun yaşanmasın
+        st.error(f"Veri çekme hatası: {e}")
         return []
 
 def cache_temizle():
