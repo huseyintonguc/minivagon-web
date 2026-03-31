@@ -153,8 +153,9 @@ def create_efatura_payload(siparis, user_id=None, company_id=None):
     if not tel or len(tel) < 7:
         tel = "05555555555" # Geçersizse varsayılan değer
     
-    # Adres parse (Çok basit, varsayılan değerlerle)
     tam_adres = str(siparis.get('Adres', 'Türkiye')).strip()
+    il = str(siparis.get('İl', '')).strip()
+    ilce = str(siparis.get('İlçe', '')).strip()
     
     payload = {
       "autoInvoiceId": True,
@@ -163,8 +164,8 @@ def create_efatura_payload(siparis, user_id=None, company_id=None):
       "taxId": str(satici_vkn),
       "source": "PORTAL",
       "recipientInfo": {
-        "city": "Bilinmiyor",
-        "district": "Bilinmiyor",
+        "city": il,
+        "district": ilce,
         "address": tam_adres,
         "postalCode": "00000",
         "phone": tel,
@@ -383,10 +384,12 @@ def format_trendyol_orders(orders, existing_db_df):
         kargo_takip = order.get('cargoTrackingNumber', '')
         
         # ["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu"]
+        il = ship_addr.get('city','')
+        ilce = ship_addr.get('district','')
         satir = [
             ty_order_no, tarih, durum, musteri_adi, tel, tc, mail,
             u1, a1, i1, u2, a2, i2, toplam_tutar, odeme, kaynak,
-            adres, kargo_takip, fatura, tedarik
+            adres, kargo_takip, fatura, tedarik, il, ilce
         ]
         
         formatted_list.append(satir)
@@ -463,7 +466,7 @@ def pazaryeri_siparis_ekle(satir):
     try: w = sh.worksheet("PazaryeriSiparisleri")
     except:
         w = sh.add_worksheet(title="PazaryeriSiparisleri", rows=100, cols=20)
-        w.append_row(["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu"])
+        w.append_row(["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe"])
     w.append_row(satir)
     cache_temizle()
 
@@ -473,7 +476,7 @@ def pazaryeri_siparis_toplu_ekle(satirlar):
     try: w = sh.worksheet("PazaryeriSiparisleri")
     except:
         w = sh.add_worksheet(title="PazaryeriSiparisleri", rows=max(100, len(satirlar) + 1), cols=20)
-        w.append_row(["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu"])
+        w.append_row(["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe"])
     
     # Tüm satırları tek bir API isteğiyle (bulk) ekliyoruz. (value_input_option='USER_ENTERED' formatı korur)
     w.append_rows(satirlar, value_input_option='USER_ENTERED')
@@ -737,7 +740,17 @@ def create_pdf(s, urun_dict):
     pdf.cell(0, 8, tr(f"Müşteri: {s.get('Müşteri')}"), ln=1)
     set_ft('', 12)
     pdf.cell(0, 8, tr(f"Telefon: {s.get('Telefon')}"), ln=1)
-    pdf.multi_cell(0, 8, tr(f"Adres: {s.get('Adres')}"))
+    
+    # İl ve İlçe kontrolü
+    il = str(s.get('İl', '')).strip()
+    ilce = str(s.get('İlçe', '')).strip()
+    adres_metni = s.get('Adres', '')
+    
+    if il and ilce:
+        adres_metni = f"{adres_metni}
+{ilce.upper()} / {il.upper()}"
+        
+    pdf.multi_cell(0, 8, tr(f"Adres: {adres_metni}"))
     if s.get('Not'): 
         pdf.ln(2)
         set_ft('B', 12)
@@ -786,11 +799,21 @@ if menu == "📦 Sipariş Girişi":
             tel = st.text_input("Telefon")
             tc = st.text_input("TC (Opsiyonel)")
             mail = st.text_input("Mail (Opsiyonel)")
-            adres = st.text_area("Adres", height=100)
+            
+            # İl ve İlçe zorunlu alanlar
+            col_il, col_ilce = st.columns(2)
+            il = col_il.text_input("İl (Zorunlu)")
+            ilce = col_ilce.text_input("İlçe (Zorunlu)")
+            
+            adres = st.text_area("Adres Detayı", height=100)
             notlar = st.text_input("Not")
             fatura = "KESİLDİ" if st.checkbox("Faturası Kesildi") else "KESİLMEDİ"
             tedarik = "BEKLİYOR"
             if st.form_submit_button("KAYDET", type="primary"):
+                if not il or not ilce:
+                    st.error("Lütfen İl ve İlçe alanlarını doldurunuz. Fatura kesimi için zorunludur.")
+                    st.stop()
+                    
                 try:
                     mevcut = verileri_getir("Siparisler")
                     yeni_no = 1000
@@ -800,7 +823,8 @@ if menu == "📦 Sipariş Girişi":
                             try: yeni_no = int(pd.to_numeric(df_m['Siparis No'], errors='coerce').max()) + 1
                             except: pass
                     tarih = simdi().strftime("%d.%m.%Y %H:%M")
-                    satir = [yeni_no, tarih, durum, ad, tel, tc, mail, u1, a1, i1, u2, a2, i2, tutar, odeme, kaynak, adres, notlar, fatura, tedarik]
+                    # Sütun kaymasını önlemek için İl ve İlçe'yi en sona ekliyoruz
+                    satir = [yeni_no, tarih, durum, ad, tel, tc, mail, u1, a1, i1, u2, a2, i2, tutar, odeme, kaynak, adres, notlar, fatura, tedarik, il.upper(), ilce.upper()]
                     siparis_ekle(satir)
                     st.success(f"✅ Sipariş #{yeni_no} Kaydedildi!")
                 except Exception as e: st.error(f"Hata: {e}")
@@ -879,7 +903,7 @@ elif menu == "📋 Sipariş Listesi":
                     else:
                         st.success(f"{len(yeni_siparis_satirlari)} adet yeni Trendyol siparişi bulundu!")
                         
-                        df_yeni = pd.DataFrame(yeni_siparis_satirlari, columns=["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu"])
+                        df_yeni = pd.DataFrame(yeni_siparis_satirlari, columns=["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe"])
                         st.dataframe(df_yeni[["Pazaryeri Siparis No", "Müşteri", "Ürün 1", "Adet 1", "Tutar", "Tarih", "Durum"]], use_container_width=True)
                         
                         if st.button("✅ Listeyi Pazaryeri Tablosuna Kaydet", type="primary"):
@@ -962,6 +986,13 @@ elif menu == "🧾 Fatura Takibi":
                                                 # token artık bir dict dönüyor: {"token": "...", "user_id": "...", "company_id": "..."}
                                                 payload = create_efatura_payload(siparis_satiri, user_id=token.get("user_id"), company_id=token.get("company_id"))
                                                 
+                                                il_kontrol = siparis_satiri.get('İl', '')
+                                                ilce_kontrol = siparis_satiri.get('İlçe', '')
+                                                
+                                                if not il_kontrol or not ilce_kontrol or str(il_kontrol).strip() == "" or str(ilce_kontrol).strip() == "":
+                                                    st.error(f"#{sip_no} Hatası: İl veya İlçe bilgisi eksik! Lütfen siparişi güncelleyip (veya excelden ekleyip) tekrar deneyin.")
+                                                    continue
+
                                                 cevap, msj2 = trendyol_efatura_kes(token.get("token"), payload)
                                                 if msj2 == "BAŞARILI":
                                                     basarili_nolar.append(sip_no)
