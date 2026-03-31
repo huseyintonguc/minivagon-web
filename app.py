@@ -747,8 +747,7 @@ def create_pdf(s, urun_dict):
     adres_metni = s.get('Adres', '')
     
     if il and ilce:
-        adres_metni = f"{adres_metni}
-{ilce.upper()} / {il.upper()}"
+        adres_metni = f"{adres_metni}\n{ilce.upper()} / {il.upper()}"
         
     pdf.multi_cell(0, 8, tr(f"Adres: {adres_metni}"))
     if s.get('Not'): 
