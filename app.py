@@ -680,8 +680,10 @@ def get_maliyet_dict():
 
 # --- PDF OLUŞTURMA ---
 def create_pdf(s, urun_dict):
-    pdf = FPDF()
+    pdf = FPDF(format=(100, 150))
     pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=5)
+
     # Arial fontunun kalın, italik versiyonlarını da eklememiz gerekiyor (bold, italic için)
     # Eğer font dosyaları yoksa fpdf hata vermez ama set_font('ArialTR', 'B') çalışmaz
     # Bu yüzden sadece normal metin için ArialTR kullanıp, diğerleri için fpdf standart fontlarını kullanabilir veya hepsini ArialTR (normal) yapabiliriz
@@ -689,15 +691,23 @@ def create_pdf(s, urun_dict):
         pdf.add_font('ArialTR', '', 'arial.ttf', uni=True)
         pdf.add_font('ArialTR', 'B', 'arial.ttf', uni=True)
         pdf.add_font('ArialTR', 'I', 'arial.ttf', uni=True)
-        pdf.set_font('ArialTR', '', 12)
+        pdf.set_font('ArialTR', '', 10)
     except Exception as e:
         print("Font yuklenemedi:", e)
-        pdf.set_font("Arial", size=12)
-    pdf.set_fill_color(40, 40, 40); pdf.rect(0, 0, 210, 30, 'F')
-    pdf.set_text_color(255, 255, 255); pdf.set_font_size(20); pdf.text(10, 20, "MINIVAGON")
-    pdf.set_font_size(10); pdf.set_text_color(200, 200, 200)
-    pdf.text(150, 15, f"Siparis No: #{s.get('Siparis No')}")
-    pdf.text(150, 22, f"Tarih: {s.get('Tarih')}")
+        pdf.set_font("Arial", size=10)
+
+    pdf.set_fill_color(40, 40, 40)
+    pdf.rect(0, 0, 100, 20, 'F')
+
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font_size(14)
+    pdf.text(5, 13, "MINIVAGON")
+
+    pdf.set_font_size(8)
+    pdf.set_text_color(200, 200, 200)
+    pdf.text(55, 8, f"Siparis No: #{s.get('Siparis No')}")
+    pdf.text(55, 14, f"Tarih: {s.get('Tarih')}")
+
     def resim_koy(u_adi, x_pos):
         if u_adi in urun_dict:
             dosya_adi = urun_dict[u_adi]
@@ -705,12 +715,22 @@ def create_pdf(s, urun_dict):
             if os.path.exists(full_path):
                 try:
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                        img = Image.open(full_path).convert('RGB'); img.thumbnail((300, 220)); img.save(tmp.name)
-                        pdf.image(tmp.name, x=x_pos, y=40, h=60)
-                except: pass
-    if s.get('Ürün 2'): resim_koy(s.get('Ürün 1'), 15); resim_koy(s.get('Ürün 2'), 110)
-    else: resim_koy(s.get('Ürün 1'), 65)
-    pdf.set_y(110); pdf.set_text_color(0, 0, 0); pdf.set_font_size(12)
+                        img = Image.open(full_path).convert('RGB')
+                        img.thumbnail((300, 220))
+                        img.save(tmp.name)
+                        pdf.image(tmp.name, x=x_pos, y=22, w=40)
+                except Exception as e:
+                    print("Resim hatasi:", e)
+
+    if s.get('Ürün 2'):
+        resim_koy(s.get('Ürün 1'), 5)
+        resim_koy(s.get('Ürün 2'), 55)
+    else:
+        resim_koy(s.get('Ürün 1'), 30)
+
+    pdf.set_y(65)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font_size(10)
 
     # Eğer font yüklenmişse (fpdf anahtarları küçük harfle tutar) fpdf utf-8 destekler, çeviriye gerek kalmaz.
     # Eğer yüklenememişse (fallback Arial) türkçe karakterleri düzeltmemiz gerekir ki pdf çökmesin.
@@ -719,58 +739,75 @@ def create_pdf(s, urun_dict):
         if 'arialtr' in pdf.fonts: return str(t)
         return str(t).replace("ğ","g").replace("Ğ","G").replace("ş","s").replace("Ş","S").replace("İ","I").replace("ı","i").encode('latin-1','replace').decode('latin-1')
 
-    def set_ft(style='', size=12):
+    def set_ft(style='', size=10):
         if 'arialtr' in pdf.fonts: pdf.set_font('ArialTR', style, size)
         else: pdf.set_font('Arial', style, size)
 
-    pdf.set_fill_color(240, 240, 240); pdf.cell(0, 10, tr("  ÜRÜN DETAYLARI"), ln=1, fill=True); pdf.ln(2)
+    pdf.set_fill_color(240, 240, 240)
+    pdf.cell(0, 6, tr("  ÜRÜN DETAYLARI"), ln=1, fill=True)
+    pdf.ln(1)
 
     # ÜRÜN 1
-    set_ft('B', 12)
-    pdf.cell(0, 8, tr(f"1) {s.get('Ürün 1')} ({s.get('Adet 1')} Adet)"), ln=1)
+    set_ft('B', 10)
+    pdf.multi_cell(0, 5, tr(f"1) {s.get('Ürün 1')} ({s.get('Adet 1')} Adet)"))
     if s.get('İsim 1'):
-        set_ft('I', 11)
-        pdf.set_text_color(0, 102, 204) # Mavi renk
-        pdf.cell(10) # Girinti
-        pdf.cell(0, 8, tr(f">>> YAZILACAK İSİM: {s.get('İsim 1')} <<<"), ln=1)
-        pdf.set_text_color(0, 0, 0) # Rengi normale döndür
+        set_ft('I', 9)
+        pdf.set_text_color(0, 102, 204)
+        pdf.set_x(10)
+        pdf.multi_cell(0, 5, tr(f">>> YAZILACAK İSİM: {s.get('İsim 1')} <<<"))
+        pdf.set_text_color(0, 0, 0)
 
     # ÜRÜN 2
     if s.get('Ürün 2'):
-        pdf.ln(2)
-        set_ft('B', 12)
-        pdf.cell(0, 8, tr(f"2) {s.get('Ürün 2')} ({s.get('Adet 2')} Adet)"), ln=1)
+        pdf.ln(1)
+        set_ft('B', 10)
+        pdf.multi_cell(0, 5, tr(f"2) {s.get('Ürün 2')} ({s.get('Adet 2')} Adet)"))
         if s.get('İsim 2'):
-            set_ft('I', 11)
+            set_ft('I', 9)
             pdf.set_text_color(0, 102, 204)
-            pdf.cell(10)
-            pdf.cell(0, 8, tr(f">>> YAZILACAK İSİM: {s.get('İsim 2')} <<<"), ln=1)
+            pdf.set_x(10)
+            pdf.multi_cell(0, 5, tr(f">>> YAZILACAK İSİM: {s.get('İsim 2')} <<<"))
             pdf.set_text_color(0, 0, 0)
 
-    pdf.ln(5)
-    set_ft('', 12)
+    pdf.ln(2)
+    set_ft('', 10)
 
     odeme_turu = str(s.get('Ödeme', '')).upper()
+
+    # Store current Y to draw rect correctly
+    y_start = pdf.get_y()
     if "KAPIDA" in odeme_turu:
-        pdf.set_fill_color(255, 230, 100); pdf.rect(10, pdf.get_y(), 190, 25, 'F'); pdf.set_xy(12, pdf.get_y()+2)
-        pdf.cell(0, 10, tr(f"ÖDEME TÜRÜ: {odeme_turu}"), ln=1); pdf.set_text_color(200, 0, 0)
-        set_ft('B', 16)
-        pdf.cell(0, 10, tr(f"TAHSİL EDİLECEK TUTAR: {s.get('Tutar')} TL"), ln=1)
-        pdf.set_text_color(0, 0, 0); set_ft('', 12); pdf.ln(5)
+        pdf.set_fill_color(255, 230, 100)
+        pdf.rect(5, y_start, 90, 14, 'F')
+        pdf.set_xy(6, y_start + 1)
+        pdf.cell(0, 5, tr(f"ÖDEME TÜRÜ: {odeme_turu}"), ln=1)
+        pdf.set_text_color(200, 0, 0)
+        set_ft('B', 11)
+        pdf.cell(0, 6, tr(f"TAHSİL EDİLECEK TUTAR: {s.get('Tutar')} TL"), ln=1)
+        pdf.set_text_color(0, 0, 0)
+        set_ft('', 9)
     else:
         # Ödemesi alınmış durumlarda yeşil arka plan ve mesaj
-        pdf.set_fill_color(200, 240, 200); pdf.rect(10, pdf.get_y(), 190, 25, 'F'); pdf.set_xy(12, pdf.get_y()+2)
-        pdf.cell(0, 10, tr(f"ÖDEME TÜRÜ: {odeme_turu} | Tutar: {s.get('Tutar')} TL"), ln=1)
-        pdf.set_text_color(0, 128, 0) # Yeşil renk
-        set_ft('B', 16)
-        pdf.cell(0, 10, tr("ÖDEMESİ ALINDI - TAHSİLAT YOK"), ln=1)
-        pdf.set_text_color(0, 0, 0); set_ft('', 12); pdf.ln(5)
+        pdf.set_fill_color(200, 240, 200)
+        pdf.rect(5, y_start, 90, 14, 'F')
+        pdf.set_xy(6, y_start + 1)
+        pdf.cell(0, 5, tr(f"ÖDEME TÜRÜ: {odeme_turu} | Tutar: {s.get('Tutar')} TL"), ln=1)
+        pdf.set_text_color(0, 128, 0)
+        set_ft('B', 11)
+        pdf.cell(0, 6, tr("ÖDEMESİ ALINDI - TAHSİLAT YOK"), ln=1)
+        pdf.set_text_color(0, 0, 0)
+        set_ft('', 9)
 
-    pdf.set_fill_color(240, 240, 240); pdf.cell(0, 10, tr("  MÜŞTERİ BİLGİLERİ"), ln=1, fill=True); pdf.ln(2)
-    set_ft('B', 12)
-    pdf.cell(0, 8, tr(f"Müşteri: {s.get('Müşteri')}"), ln=1)
-    set_ft('', 12)
-    pdf.cell(0, 8, tr(f"Telefon: {s.get('Telefon')}"), ln=1)
+    pdf.set_y(y_start + 16)
+
+    pdf.set_fill_color(240, 240, 240)
+    pdf.cell(0, 6, tr("  MÜŞTERİ BİLGİLERİ"), ln=1, fill=True)
+    pdf.ln(1)
+
+    set_ft('B', 9)
+    pdf.multi_cell(0, 4, tr(f"Müşteri: {s.get('Müşteri')}"))
+    set_ft('', 9)
+    pdf.multi_cell(0, 4, tr(f"Telefon: {s.get('Telefon')}"))
 
     # İl ve İlçe kontrolü
     il = str(s.get('İl', '')).strip()
@@ -780,14 +817,14 @@ def create_pdf(s, urun_dict):
     if il and ilce:
         adres_metni = f"{adres_metni}\n{ilce.upper()} / {il.upper()}"
 
-    pdf.multi_cell(0, 8, tr(f"Adres: {adres_metni}"))
+    pdf.multi_cell(0, 4, tr(f"Adres: {adres_metni}"))
     if s.get('Not'):
-        pdf.ln(2)
-        set_ft('B', 12)
+        pdf.ln(1)
+        set_ft('B', 9)
         pdf.set_text_color(200, 0, 0)
-        pdf.multi_cell(0, 8, tr(f"MÜŞTERİ NOTU: {s.get('Not')}"))
+        pdf.multi_cell(0, 4, tr(f"MÜŞTERİ NOTU: {s.get('Not')}"))
         pdf.set_text_color(0, 0, 0)
-        set_ft('', 12)
+        set_ft('', 9)
 
     return pdf.output(dest='S').encode('latin-1')
 
