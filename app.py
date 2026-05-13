@@ -973,9 +973,7 @@ def create_pazaryeri_pdf(s, urun_dict):
     if kargo_takip:
         pdf.ln(10)
         
-        # Once kargo firmasi yazalim
-        set_ft('B', 10)
-        
+        # Kargo Firmasi kaldirildi, sadece Kargo Takip No yaziyoruz
         set_ft('', 9)
         pdf.cell(0, 4, tr(f"Kargo Takip No: {kargo_takip}"), ln=1, align='C')
         pdf.ln(2)
@@ -985,8 +983,8 @@ def create_pazaryeri_pdf(s, urun_dict):
             import os
             import requests
             
-            # API ile en standart ve net barkodu olusturuyoruz
-            api_url = f"https://bwipjs-api.metafloor.com/?bcid=code128&text={kargo_takip}&scale=3&includetext=false"
+            # API ile en standart ve net barkodu olusturuyoruz (yuksekligi dusuruldu)
+            api_url = f"https://bwipjs-api.metafloor.com/?bcid=code128&text={kargo_takip}&scale=3&height=12&includetext=false"
             response = requests.get(api_url, timeout=5)
             
             if response.status_code == 200:
@@ -997,10 +995,12 @@ def create_pazaryeri_pdf(s, urun_dict):
                     f.write(response.content)
                     
                 barkod_w = 80
+                # Burada resmin yuksekligini de belirleyerek dikeyde uzamasini onluyoruz
+                barkod_h = 15
                 x_pos = (100 - barkod_w) / 2
                 
-                pdf.image(tmp_name, x=x_pos, y=pdf.get_y(), w=barkod_w)
-                pdf.set_y(pdf.get_y() + 25)
+                pdf.image(tmp_name, x=x_pos, y=pdf.get_y(), w=barkod_w, h=barkod_h)
+                pdf.set_y(pdf.get_y() + barkod_h + 5)
                 
                 try:
                     os.remove(tmp_name)
@@ -1009,13 +1009,13 @@ def create_pazaryeri_pdf(s, urun_dict):
             else:
                 # FPDF'nin kendi barkoduna fallback
                 pdf.code39(kargo_takip, x=10, y=pdf.get_y(), w=1.5, h=15)
-                pdf.set_y(pdf.get_y() + 25)
+                pdf.set_y(pdf.get_y() + 20)
                 
         except Exception as e:
             print("Barkod olusturulamadi:", e)
             try:
                 pdf.code39(kargo_takip, x=10, y=pdf.get_y(), w=1.5, h=15)
-                pdf.set_y(pdf.get_y() + 25)
+                pdf.set_y(pdf.get_y() + 20)
             except:
                 pass
 
