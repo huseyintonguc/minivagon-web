@@ -1000,7 +1000,7 @@ def create_pazaryeri_pdf(s, urun_dict):
                 x_pos = (100 - barkod_w) / 2
                 
                 pdf.image(tmp_name, x=x_pos, y=pdf.get_y(), w=barkod_w)
-                pdf.set_y(pdf.get_y() + 25)
+                pdf.set_y(pdf.get_y() + 15)
                 
                 try:
                     os.remove(tmp_name)
@@ -1009,7 +1009,7 @@ def create_pazaryeri_pdf(s, urun_dict):
             else:
                 # FPDF'nin kendi barkoduna fallback
                 pdf.code39(kargo_takip, x=10, y=pdf.get_y(), w=1.5, h=15)
-                pdf.set_y(pdf.get_y() + 15)
+                pdf.set_y(pdf.get_y() + 25)
                 
         except Exception as e:
             print("Barkod olusturulamadi:", e)
