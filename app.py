@@ -3230,7 +3230,6 @@ elif menu == "➕ Ürün Yönetimi":
         pdf.set_text_color(0, 0, 0)
         set_ft('', 12)
         
-    return pdf.output(dest='S').encode('latin-1')
 # --- MENÜ ---
 menu_options = ["📦 Sipariş Girişi", "📋 Sipariş Listesi", "🧾 Fatura Takibi", "🧾 Alış ve Tedarik", "📊 Raporlar", "💰 Cari Hesaplar", "📉 Maliyet Yönetimi", "➕ Ürün Yönetimi"]
 menu = st.sidebar.radio("Menü", menu_options)
