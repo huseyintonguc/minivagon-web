@@ -981,38 +981,43 @@ def create_pazaryeri_pdf(s, urun_dict):
         pdf.ln(2)
 
         try:
-            import barcode
-            from barcode.writer import ImageWriter
-            code128 = barcode.get_barcode_class('code128')
-            
             import tempfile
             import os
-            fd, tmp_name = tempfile.mkstemp(suffix=".png")
-            os.close(fd)
+            import requests
             
-            with open(tmp_name, 'wb') as f:
-                my_barcode = code128(kargo_takip, writer=ImageWriter())
-                options = {
-                    'write_text': False,
-                    'module_width': 0.40,
-                    'module_height': 18.0,
-                    'quiet_zone': 1.0
-                }
-                my_barcode.write(f, options=options)
+            # API ile en standart ve net barkodu olusturuyoruz
+            api_url = f"https://bwipjs-api.metafloor.com/?bcid=code128&text={kargo_takip}&scale=3&includetext=false"
+            response = requests.get(api_url, timeout=5)
+            
+            if response.status_code == 200:
+                fd, tmp_name = tempfile.mkstemp(suffix=".png")
+                os.close(fd)
                 
-            barkod_w = 90
-            x_pos = (100 - barkod_w) / 2
-            
-            pdf.image(tmp_name, x=x_pos, y=pdf.get_y(), w=barkod_w)
-            pdf.set_y(pdf.get_y() + 25)
-            
-            try:
-                os.remove(tmp_name)
-            except:
-                pass
+                with open(tmp_name, 'wb') as f:
+                    f.write(response.content)
+                    
+                barkod_w = 80
+                x_pos = (100 - barkod_w) / 2
+                
+                pdf.image(tmp_name, x=x_pos, y=pdf.get_y(), w=barkod_w)
+                pdf.set_y(pdf.get_y() + 25)
+                
+                try:
+                    os.remove(tmp_name)
+                except:
+                    pass
+            else:
+                # FPDF'nin kendi barkoduna fallback
+                pdf.code39(kargo_takip, x=10, y=pdf.get_y(), w=1.5, h=15)
+                pdf.set_y(pdf.get_y() + 25)
                 
         except Exception as e:
             print("Barkod olusturulamadi:", e)
+            try:
+                pdf.code39(kargo_takip, x=10, y=pdf.get_y(), w=1.5, h=15)
+                pdf.set_y(pdf.get_y() + 25)
+            except:
+                pass
 
     return pdf.output(dest='S').encode('latin-1')
 
