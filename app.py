@@ -975,7 +975,7 @@ def create_pazaryeri_pdf(s, urun_dict):
         
         # Once kargo firmasi yazalim
         set_ft('B', 10)
-        pdf.cell(0, 5, tr(f"Kargo Firması: {kargo_firmasi}"), ln=1, align='C')
+        
         set_ft('', 9)
         pdf.cell(0, 4, tr(f"Kargo Takip No: {kargo_takip}"), ln=1, align='C')
         pdf.ln(2)
