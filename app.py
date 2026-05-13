@@ -3165,7 +3165,6 @@ elif menu == "➕ Ürün Yönetimi":
                 yeni_urun_resim_ekle(ad, dosya)
                 st.success("Eklendi!")
             else: st.warning("Eksik bilgi.")
-
     
     # ÜRÜN 1
     set_ft('B', 12)
@@ -3232,7 +3231,6 @@ elif menu == "➕ Ürün Yönetimi":
         set_ft('', 12)
         
     return pdf.output(dest='S').encode('latin-1')
-
 # --- MENÜ ---
 menu_options = ["📦 Sipariş Girişi", "📋 Sipariş Listesi", "🧾 Fatura Takibi", "🧾 Alış ve Tedarik", "📊 Raporlar", "💰 Cari Hesaplar", "📉 Maliyet Yönetimi", "➕ Ürün Yönetimi"]
 menu = st.sidebar.radio("Menü", menu_options)
