@@ -381,15 +381,16 @@ def format_trendyol_orders(orders, existing_db_df):
         kaynak = "Trendyol"
         fatura = "KESİLMEDİ"
         tedarik = "BEKLİYOR"
-        kargo_takip = order.get('cargoTrackingNumber', '')
+        kargo_takip = str(order.get('cargoTrackingNumber', '')).strip()
+        kargo_firmasi = str(order.get('cargoProviderName', '')).strip()
 
-        # ["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu"]
+        # ["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe", "Kargo Firması"]
         il = ship_addr.get('city','')
         ilce = ship_addr.get('district','')
         satir = [
             ty_order_no, tarih, durum, musteri_adi, tel, tc, mail,
             u1, a1, i1, u2, a2, i2, toplam_tutar, odeme, kaynak,
-            adres, kargo_takip, fatura, tedarik, il, ilce
+            adres, kargo_takip, fatura, tedarik, il, ilce, kargo_firmasi
         ]
 
         formatted_list.append(satir)
@@ -497,7 +498,7 @@ def pazaryeri_siparis_ekle(satir):
     try: w = sh.worksheet("PazaryeriSiparisleri")
     except:
         w = sh.add_worksheet(title="PazaryeriSiparisleri", rows=100, cols=20)
-        w.append_row(["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe"])
+        w.append_row(["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe", "Kargo Firması"])
     w.append_row(satir)
     cache_temizle()
 
@@ -507,7 +508,7 @@ def pazaryeri_siparis_toplu_ekle(satirlar):
     try: w = sh.worksheet("PazaryeriSiparisleri")
     except:
         w = sh.add_worksheet(title="PazaryeriSiparisleri", rows=max(100, len(satirlar) + 1), cols=20)
-        w.append_row(["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe"])
+        w.append_row(["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe", "Kargo Firması"])
 
     # Tüm satırları tek bir API isteğiyle (bulk) ekliyoruz. (value_input_option='USER_ENTERED' formatı korur)
     w.append_rows(satirlar, value_input_option='USER_ENTERED')
@@ -876,7 +877,7 @@ def create_pazaryeri_pdf(s, urun_dict):
     # Virgül veya nokta ile girilmiş format bozuklukları varsa temizle (kargo takip numarasında harf ve rakam olur)
     kargo_takip = ''.join(c for c in kargo_takip if c.isalnum())
 
-    kargo_firmasi = str(s.get('Kargo Firması', 'TRENDYOL EXPRESS')).strip()
+    kargo_firmasi = str(s.get('Kargo Firması', '')).strip()
     if not kargo_firmasi:
         kargo_firmasi = "TRENDYOL EXPRESS"
 
@@ -1107,7 +1108,7 @@ elif menu == "📋 Sipariş Listesi":
                     else:
                         st.success(f"{len(yeni_siparis_satirlari)} adet yeni Trendyol siparişi bulundu!")
 
-                        df_yeni = pd.DataFrame(yeni_siparis_satirlari, columns=["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe"])
+                        df_yeni = pd.DataFrame(yeni_siparis_satirlari, columns=["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe", "Kargo Firması"])
                         st.dataframe(df_yeni[["Pazaryeri Siparis No", "Müşteri", "Ürün 1", "Adet 1", "Tutar", "Tarih", "Durum"]], use_container_width=True)
 
                         if st.button("✅ Listeyi Pazaryeri Tablosuna Kaydet", type="primary"):
