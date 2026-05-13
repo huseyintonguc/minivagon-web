@@ -868,10 +868,15 @@ def create_pazaryeri_pdf(s, urun_dict):
     kargo_takip = str(s.get('Kargo Takip No', '')).strip()
     
     # Bilimsel gösterim varsa düzelt. Örn: 7.26003E+15
+    # Not: Pandas float olarak okuduysa Excel'den hassasiyet kaybolmuş olabilir.
+    # Bu yüzden numaranın tam metin olarak girilmesi/okunması tavsiye edilir.
     if 'E' in kargo_takip.upper():
         try:
-            # float() ile okuyup tam sayıya çeviriyoruz (bilimsel formatı düzeltmek için)
-            kargo_takip = str(int(float(kargo_takip.upper().replace(',', '.'))))
+            # Sadece E'li formatı sayıya çevirmeyi dener.
+            # Ancak çok haneli sayılarda son rakamlar sıfır olabilir (7260030000000000 gibi).
+            # Excel'den metin olarak çekmek en doğrusudur.
+            val = float(kargo_takip.upper().replace(',', '.'))
+            kargo_takip = f"{val:.0f}"
         except:
             pass
     # Virgül veya nokta ile girilmiş format bozuklukları varsa temizle (kargo takip numarasında harf ve rakam olur)
@@ -952,13 +957,13 @@ def create_pazaryeri_pdf(s, urun_dict):
                 my_barcode = code128(kargo_takip, writer=ImageWriter())
                 options = {
                     'write_text': False,
-                    'module_width': 0.35,
-                    'module_height': 15.0,
-                    'quiet_zone': 2.0
+                    'module_width': 0.40,
+                    'module_height': 18.0,
+                    'quiet_zone': 1.0
                 }
                 my_barcode.write(f, options=options)
                 
-            barkod_w = 80
+            barkod_w = 90
             x_pos = (100 - barkod_w) / 2
             
             pdf.image(tmp_name, x=x_pos, y=pdf.get_y(), w=barkod_w)
