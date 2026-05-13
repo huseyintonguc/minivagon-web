@@ -21,6 +21,43 @@ st.set_page_config(page_title="MiniVagon Bulut", page_icon="☁️", layout="wid
 SHEET_ADI = "MiniVagonDB"
 RESIM_KLASORU = "resimler"
 
+
+# --- GİRİŞ SİSTEMİ (LOGIN) ---
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+def check_login():
+    auth_secrets = st.secrets.get("auth", {})
+    correct_username = auth_secrets.get("username", "admin")
+    correct_password = auth_secrets.get("password", "123456")
+
+    st.markdown("<h2 style='text-align: center; color: #4A90E2;'>MiniVagon Bulut Girişi</h2>", unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1,2,1])
+    with col2:
+        with st.form("login_form"):
+            username = st.text_input("Kullanıcı Adı")
+            password = st.text_input("Şifre", type="password")
+            submitted = st.form_submit_button("Giriş Yap", use_container_width=True)
+
+            if submitted:
+                if username == correct_username and password == correct_password:
+                    st.session_state["logged_in"] = True
+                    st.rerun()
+                else:
+                    st.error("Kullanıcı adı veya şifre hatalı!")
+
+if not st.session_state["logged_in"]:
+    check_login()
+    st.stop() # Uygulamanın geri kalanının çalışmasını durdur
+
+# Geri kalan kod (Sadece giriş yapıldıysa çalışır)
+st.sidebar.markdown(f"👤 **Hoşgeldiniz, {st.secrets.get('auth', {}).get('username', 'admin')}**")
+if st.sidebar.button("🚪 Çıkış Yap"):
+    st.session_state["logged_in"] = False
+    st.rerun()
+
+
 # --- ZAMAN AYARI ---
 def simdi():
     tz = pytz.timezone('Europe/Istanbul')
