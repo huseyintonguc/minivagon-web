@@ -936,7 +936,11 @@ def create_pazaryeri_pdf(s, urun_dict):
             code128 = barcode.get_barcode_class('code128')
 
             # Generate the image in a temporary file to load it into pdf
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+            import os
+            fd, tmp_name = tempfile.mkstemp(suffix=".png")
+            os.close(fd)
+
+            with open(tmp_name, 'wb') as f:
                 my_barcode = code128(kargo_takip, writer=ImageWriter())
                 options = {
                     'write_text': False, # metni biz PDF ile altina yazalim
@@ -944,15 +948,16 @@ def create_pazaryeri_pdf(s, urun_dict):
                     'module_height': 12.0, # yukseklik
                     'quiet_zone': 2.0
                 }
-                my_barcode.write(tmp, options=options)
+                my_barcode.write(f, options=options)
 
-                # We need to compute x_pos. width of image in mm depends on DPI.
-                # Just scale width to say 80mm
-                barkod_w = 80
-                x_pos = (100 - barkod_w) / 2
+            # We need to compute x_pos. width of image in mm depends on DPI.
+            # Just scale width to say 80mm
+            barkod_w = 80
+            x_pos = (100 - barkod_w) / 2
 
-                pdf.image(tmp.name, x=x_pos, y=pdf.get_y(), w=barkod_w)
-                pdf.set_y(pdf.get_y() + 20) # resim boyutuna gore ayarlandi
+            pdf.image(tmp_name, x=x_pos, y=pdf.get_y(), w=barkod_w)
+            pdf.set_y(pdf.get_y() + 20) # resim boyutuna gore ayarlandi
+            os.remove(tmp_name)
 
         except Exception as e:
             print("Barkod olusturulamadi, varsayilan yazi gosterilecek:", e)
