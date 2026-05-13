@@ -865,40 +865,25 @@ def create_pazaryeri_pdf(s, urun_dict):
     pdf.set_text_color(0, 0, 0)
     
     kargo_takip = str(s.get('Kargo Takip No', '')).strip()
+    # Excel formatında bilimsel gösterim sorunu olabiliyor: 7.26003E+15 gibi. Bunu düzeltelim:
+    try:
+        if 'E' in kargo_takip.upper():
+            kargo_takip = str(int(float(kargo_takip)))
+    except:
+        pass
+
     pazaryeri_sip_no = str(s.get('Pazaryeri Siparis No', s.get('Siparis No', ''))).strip()
+    try:
+        if 'E' in pazaryeri_sip_no.upper():
+            pazaryeri_sip_no = str(int(float(pazaryeri_sip_no)))
+    except:
+        pass
 
     pdf.set_y(18)
     set_ft('B', 10)
     pdf.cell(0, 5, tr("Sipariş No: " + pazaryeri_sip_no), ln=1)
 
-    # Barcode
-    if kargo_takip:
-        pdf.ln(2)
-        try:
-            # width multiplier = 0.5 to fit in page, height = 15
-            pdf.code39(kargo_takip, x=5, y=pdf.get_y(), w=0.5, h=15)
-            pdf.set_y(pdf.get_y() + 16)
-            set_ft('', 8)
-            pdf.cell(0, 4, tr(f"Kargo Barkod: {kargo_takip}"), ln=1, align='C')
-        except Exception as e:
-            pdf.cell(0, 5, tr(f"Kargo Takip No: {kargo_takip}"), ln=1)
-            print("Barkod olusturulamadi:", e)
-
     pdf.ln(2)
-
-    # Urunler
-    pdf.set_fill_color(240, 240, 240)
-    set_ft('', 9)
-    pdf.cell(0, 5, tr("  ÜRÜN DETAYLARI"), ln=1, fill=True)
-    pdf.ln(1)
-
-    set_ft('B', 9)
-    pdf.multi_cell(0, 4, tr(f"1) {s.get('Ürün 1')} ({s.get('Adet 1')} Adet)"))
-    if s.get('Ürün 2'):
-        pdf.ln(1)
-        pdf.multi_cell(0, 4, tr(f"2) {s.get('Ürün 2')} ({s.get('Adet 2')} Adet)"))
-
-    pdf.ln(3)
 
     # Musteri
     pdf.set_fill_color(240, 240, 240)
@@ -913,11 +898,41 @@ def create_pazaryeri_pdf(s, urun_dict):
 
     il = str(s.get('İl', '')).strip()
     ilce = str(s.get('İlçe', '')).strip()
-    adres_metni = s.get('Adres', '')
+    adres_metni = str(s.get('Adres', '')).strip()
     if il and ilce:
         adres_metni = f"{adres_metni}\n{ilce.upper()} / {il.upper()}"
 
     pdf.multi_cell(0, 4, tr(f"Adres: {adres_metni}"))
+    
+    pdf.ln(3)
+
+    # Urunler
+    pdf.set_fill_color(240, 240, 240)
+    set_ft('', 9)
+    pdf.cell(0, 5, tr("  ÜRÜN DETAYLARI"), ln=1, fill=True)
+    pdf.ln(1)
+
+    set_ft('B', 9)
+    pdf.multi_cell(0, 4, tr(f"1) {s.get('Ürün 1')} ({s.get('Adet 1')} Adet)"))
+    if s.get('Ürün 2'):
+        pdf.ln(1)
+        pdf.multi_cell(0, 4, tr(f"2) {s.get('Ürün 2')} ({s.get('Adet 2')} Adet)"))
+
+    # Barcode
+    if kargo_takip:
+        pdf.ln(10)
+        # Ortalamak için: width=0.5x, barkod yaklasik w * len, ama w=0.5 -> len(kargo_takip)*0.5 -> vs.
+        # Manuel x pozisyonu
+        # fpdf.code39 x ve y aliyor
+        try:
+            # 100 mm genislik, ortalamak icin x ayari
+            pdf.code39(kargo_takip, x=10, y=pdf.get_y(), w=0.6, h=15)
+            pdf.set_y(pdf.get_y() + 16)
+            set_ft('', 8)
+            pdf.cell(0, 4, tr(f"Kargo Takip No: {kargo_takip}"), ln=1, align='C')
+        except Exception as e:
+            pdf.cell(0, 5, tr(f"Kargo Takip No: {kargo_takip}"), ln=1, align='C')
+            print("Barkod olusturulamadi:", e)
 
     return pdf.output(dest='S').encode('latin-1')
 
