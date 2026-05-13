@@ -865,19 +865,23 @@ def create_pazaryeri_pdf(s, urun_dict):
     pdf.set_text_color(0, 0, 0)
     
     kargo_takip = str(s.get('Kargo Takip No', '')).strip()
-    # Excel formatında bilimsel gösterim sorunu olabiliyor: 7.26003E+15 gibi. Bunu düzeltelim:
-    try:
-        if 'E' in kargo_takip.upper():
-            kargo_takip = str(int(float(kargo_takip)))
-    except:
-        pass
+    
+    # Bilimsel gösterim varsa düzelt. Örn: 7.26003E+15
+    if 'E' in kargo_takip.upper():
+        try:
+            # float() ile okuyup tam sayıya çeviriyoruz (bilimsel formatı düzeltmek için)
+            kargo_takip = str(int(float(kargo_takip.upper().replace(',', '.'))))
+        except:
+            pass
+    # Virgül veya nokta ile girilmiş format bozuklukları varsa temizle (kargo takip numarasında harf ve rakam olur)
+    kargo_takip = ''.join(c for c in kargo_takip if c.isalnum())
 
     pazaryeri_sip_no = str(s.get('Pazaryeri Siparis No', s.get('Siparis No', ''))).strip()
-    try:
-        if 'E' in pazaryeri_sip_no.upper():
-            pazaryeri_sip_no = str(int(float(pazaryeri_sip_no)))
-    except:
-        pass
+    if 'E' in pazaryeri_sip_no.upper():
+        try:
+            pazaryeri_sip_no = str(int(float(pazaryeri_sip_no.upper().replace(',', '.'))))
+        except:
+            pass
 
     pdf.set_y(18)
     set_ft('B', 10)
@@ -921,14 +925,21 @@ def create_pazaryeri_pdf(s, urun_dict):
     # Barcode
     if kargo_takip:
         pdf.ln(10)
-        # Ortalamak için: width=0.5x, barkod yaklasik w * len, ama w=0.5 -> len(kargo_takip)*0.5 -> vs.
-        # Manuel x pozisyonu
-        # fpdf.code39 x ve y aliyor
         try:
-            # 100 mm genislik, ortalamak icin x ayari
-            pdf.code39(kargo_takip, x=10, y=pdf.get_y(), w=0.6, h=15)
-            pdf.set_y(pdf.get_y() + 16)
-            set_ft('', 8)
+            # Code39 barkod genişliği hesaplaması
+            # code39 algoritmasında her karakter için 13 birim çizilir, başa ve sona * eklenir (+2 karakter).
+            karakter_uzunlugu = len(kargo_takip) + 2
+            toplam_birim = karakter_uzunlugu * 13 - 1
+            
+            # Sayfaya (100mm) sığması için maksimum w değerini bulalım. Max kullanılabilir alan: 90mm
+            w = min(0.6, 90 / toplam_birim) 
+            
+            barkod_genisligi = toplam_birim * w
+            x_pos = (100 - barkod_genisligi) / 2 # Ortala
+            
+            pdf.code39(kargo_takip, x=x_pos, y=pdf.get_y(), w=w, h=15)
+            pdf.set_y(pdf.get_y() + 17)
+            set_ft('', 9)
             pdf.cell(0, 4, tr(f"Kargo Takip No: {kargo_takip}"), ln=1, align='C')
         except Exception as e:
             pdf.cell(0, 5, tr(f"Kargo Takip No: {kargo_takip}"), ln=1, align='C')
