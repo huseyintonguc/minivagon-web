@@ -1008,7 +1008,7 @@ def create_pazaryeri_pdf(s, urun_dict):
                     pass
             else:
                 # FPDF'nin kendi barkoduna fallback
-                pdf.code39(kargo_takip, x=10, y=pdf.get_y(), w=1.5, h=15)
+                pdf.code39(kargo_takip, x=10, y=pdf.get_y(), w=1.5, h=8)
                 pdf.set_y(pdf.get_y() + 25)
                 
         except Exception as e:
