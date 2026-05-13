@@ -1000,7 +1000,7 @@ def create_pazaryeri_pdf(s, urun_dict):
                 x_pos = (100 - barkod_w) / 2
                 
                 pdf.image(tmp_name, x=x_pos, y=pdf.get_y(), w=barkod_w)
-                pdf.set_y(pdf.get_y() + 15)
+                pdf.set_y(pdf.get_y() + 25)
                 
                 try:
                     os.remove(tmp_name)
