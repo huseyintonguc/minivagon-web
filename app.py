@@ -876,6 +876,10 @@ def create_pazaryeri_pdf(s, urun_dict):
     # Virgül veya nokta ile girilmiş format bozuklukları varsa temizle (kargo takip numarasında harf ve rakam olur)
     kargo_takip = ''.join(c for c in kargo_takip if c.isalnum())
 
+    kargo_firmasi = str(s.get('Kargo Firması', 'TRENDYOL EXPRESS')).strip()
+    if not kargo_firmasi:
+        kargo_firmasi = "TRENDYOL EXPRESS"
+
     pazaryeri_sip_no = str(s.get('Pazaryeri Siparis No', s.get('Siparis No', ''))).strip()
     if 'E' in pazaryeri_sip_no.upper():
         try:
@@ -926,24 +930,37 @@ def create_pazaryeri_pdf(s, urun_dict):
     if kargo_takip:
         pdf.ln(10)
         try:
-            # Code39 barkod genişliği hesaplaması
-            # code39 algoritmasında her karakter için 13 birim çizilir, başa ve sona * eklenir (+2 karakter).
-            karakter_uzunlugu = len(kargo_takip) + 2
-            toplam_birim = karakter_uzunlugu * 13 - 1
+            import barcode
+            from barcode.writer import ImageWriter
+            code128 = barcode.get_barcode_class('code128')
             
-            # Sayfaya (100mm) sığması için maksimum w değerini bulalım. Max kullanılabilir alan: 90mm
-            w = min(0.6, 90 / toplam_birim) 
-            
-            barkod_genisligi = toplam_birim * w
-            x_pos = (100 - barkod_genisligi) / 2 # Ortala
-            
-            pdf.code39(kargo_takip, x=x_pos, y=pdf.get_y(), w=w, h=15)
-            pdf.set_y(pdf.get_y() + 17)
-            set_ft('', 9)
-            pdf.cell(0, 4, tr(f"Kargo Takip No: {kargo_takip}"), ln=1, align='C')
+            # Generate the image in a temporary file to load it into pdf
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+                my_barcode = code128(kargo_takip, writer=ImageWriter())
+                options = {
+                    'write_text': False, # metni biz PDF ile altina yazalim
+                    'module_width': 0.35, # cizgilerin kalinligi
+                    'module_height': 12.0, # yukseklik
+                    'quiet_zone': 2.0
+                }
+                my_barcode.write(tmp, options=options)
+                
+                # We need to compute x_pos. width of image in mm depends on DPI.
+                # Just scale width to say 80mm
+                barkod_w = 80
+                x_pos = (100 - barkod_w) / 2
+                
+                pdf.image(tmp.name, x=x_pos, y=pdf.get_y(), w=barkod_w)
+                pdf.set_y(pdf.get_y() + 20) # resim boyutuna gore ayarlandi
+                
         except Exception as e:
-            pdf.cell(0, 5, tr(f"Kargo Takip No: {kargo_takip}"), ln=1, align='C')
-            print("Barkod olusturulamadi:", e)
+            print("Barkod olusturulamadi, varsayilan yazi gosterilecek:", e)
+            pdf.set_y(pdf.get_y() + 15)
+
+        set_ft('B', 10)
+        pdf.cell(0, 5, tr(f"Kargo Firması: {kargo_firmasi}"), ln=1, align='C')
+        set_ft('', 9)
+        pdf.cell(0, 4, tr(f"Kargo Takip No: {kargo_takip}"), ln=1, align='C')
 
     return pdf.output(dest='S').encode('latin-1')
 
