@@ -28,8 +28,9 @@ if "logged_in" not in st.session_state:
 
 def check_login():
     auth_secrets = st.secrets.get("auth", {})
-    correct_username = auth_secrets.get("username", "admin")
-    correct_password = auth_secrets.get("password", "123456")
+    import secrets
+    correct_username = auth_secrets.get("username", secrets.token_hex(16))
+    correct_password = auth_secrets.get("password", secrets.token_hex(16))
     
     st.markdown("<h2 style='text-align: center; color: #4A90E2;'>MiniVagon Bulut Girişi</h2>", unsafe_allow_html=True)
     
@@ -421,13 +422,14 @@ def format_trendyol_orders(orders, existing_db_df):
         kargo_takip = str(order.get('cargoTrackingNumber', '')).strip()
         kargo_firmasi = str(order.get('cargoProviderName', '')).strip()
 
-        # ["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe", "Kargo Firması"]
+        # ["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe", "Kargo Firması", "Yazdırıldı Durumu"]
         il = ship_addr.get('city','')
         ilce = ship_addr.get('district','')
+        yazdirildi = "YAZDIRILMADI"
         satir = [
             ty_order_no, tarih, durum, musteri_adi, tel, tc, mail,
             u1, a1, i1, u2, a2, i2, toplam_tutar, odeme, kaynak,
-            adres, kargo_takip, fatura, tedarik, il, ilce, kargo_firmasi
+            adres, kargo_takip, fatura, tedarik, il, ilce, kargo_firmasi, yazdirildi
         ]
 
         formatted_list.append(satir)
@@ -535,7 +537,7 @@ def pazaryeri_siparis_ekle(satir):
     try: w = sh.worksheet("PazaryeriSiparisleri")
     except:
         w = sh.add_worksheet(title="PazaryeriSiparisleri", rows=100, cols=20)
-        w.append_row(["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe", "Kargo Firması"])
+        w.append_row(["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe", "Kargo Firması", "Yazdırıldı Durumu"])
     w.append_row(satir)
     cache_temizle()
 
@@ -545,12 +547,43 @@ def pazaryeri_siparis_toplu_ekle(satirlar):
     try: w = sh.worksheet("PazaryeriSiparisleri")
     except:
         w = sh.add_worksheet(title="PazaryeriSiparisleri", rows=max(100, len(satirlar) + 1), cols=20)
-        w.append_row(["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe", "Kargo Firması"])
+        w.append_row(["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe", "Kargo Firması", "Yazdırıldı Durumu"])
 
     # Tüm satırları tek bir API isteğiyle (bulk) ekliyoruz. (value_input_option='USER_ENTERED' formatı korur)
     w.append_rows(satirlar, value_input_option='USER_ENTERED')
     cache_temizle()
 
+
+
+def update_yazdirildi_durumu(siparis_nolar):
+    if not siparis_nolar: return
+    sh = get_sheet()
+    try:
+        w = sh.worksheet("PazaryeriSiparisleri")
+        values = w.get_all_values()
+        if len(values) < 2: return
+        headers = values[0]
+        
+        # Sütun endekslerini bul
+        try: sip_idx = headers.index("Pazaryeri Siparis No")
+        except: return
+        try: yazdir_idx = headers.index("Yazdırıldı Durumu")
+        except: return
+        
+        cells_to_update = []
+        for i, row in enumerate(values):
+            if i == 0: continue
+            if len(row) > sip_idx:
+                sip_no = str(row[sip_idx]).strip()
+                if sip_no in siparis_nolar:
+                    # gspread cell indexing is 1-based
+                    cells_to_update.append(gspread.Cell(row=i+1, col=yazdir_idx+1, value="YAZDIRILDI"))
+        
+        if cells_to_update:
+            w.update_cells(cells_to_update)
+            cache_temizle()
+    except Exception as e:
+        print("Hata:", e)
 
 def cari_islem_ekle(satir):
     # satir formatı: [Cari Adı, Tarih, Fatura No, Not, Tutar, Tip]
@@ -867,6 +900,136 @@ def create_pdf(s, urun_dict):
     return pdf.output(dest='S').encode('latin-1')
 
 
+
+def create_pazaryeri_bulk_pdf(siparisler, urun_dict):
+    pdf = FPDF(format=(100, 150))
+    pdf.set_auto_page_break(auto=True, margin=5)
+    
+    try:
+        pdf.add_font('ArialTR', '', 'arial.ttf', uni=True)
+        pdf.add_font('ArialTR', 'B', 'arial.ttf', uni=True)
+        pdf.add_font('ArialTR', 'I', 'arial.ttf', uni=True)
+    except Exception as e:
+        print("Font yuklenemedi (bulk):", e)
+        pass
+
+    def tr(t):
+        if not t: return ""
+        if 'arialtr' in pdf.fonts: return str(t)
+        return str(t).replace("ğ","g").replace("Ğ","G").replace("ş","s").replace("Ş","S").replace("İ","I").replace("ı","i").encode('latin-1','replace').decode('latin-1')
+
+    def set_ft(style='', size=10):
+        if 'arialtr' in pdf.fonts: pdf.set_font('ArialTR', style, size)
+        else: pdf.set_font('Arial', style, size)
+
+    import tempfile
+    import os
+    import requests
+
+    for s in siparisler:
+        pdf.add_page()
+        
+        # Header
+        pdf.set_fill_color(40, 40, 40)
+        pdf.rect(0, 0, 100, 15, 'F')
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font_size(12)
+        pdf.text(5, 10, "MINIVAGON - PAZARYERI KART")
+        
+        pdf.set_font_size(8)
+        pdf.set_text_color(200, 200, 200)
+        pdf.text(60, 10, f"Tarih: {s.get('Tarih', '')}")
+        pdf.set_text_color(0, 0, 0)
+        
+        kargo_takip = str(s.get('Kargo Takip No', '')).strip()
+        if 'E' in kargo_takip.upper():
+            try:
+                val = float(kargo_takip.upper().replace(',', '.'))
+                kargo_takip = f"{val:.0f}"
+            except: pass
+        kargo_takip = ''.join(c for c in kargo_takip if c.isalnum())
+
+        pazaryeri_sip_no = str(s.get('Pazaryeri Siparis No', s.get('Siparis No', ''))).strip()
+        if 'E' in pazaryeri_sip_no.upper():
+            try: pazaryeri_sip_no = str(int(float(pazaryeri_sip_no.upper().replace(',', '.'))))
+            except: pass
+
+        pdf.set_y(18)
+        set_ft('B', 10)
+        pdf.cell(0, 5, tr("Sipariş No: " + pazaryeri_sip_no), ln=1)
+
+        pdf.ln(2)
+
+        # Musteri
+        pdf.set_fill_color(240, 240, 240)
+        set_ft('', 9)
+        pdf.cell(0, 5, tr("  MÜŞTERİ BİLGİLERİ"), ln=1, fill=True)
+        pdf.ln(1)
+        
+        set_ft('B', 9)
+        pdf.multi_cell(0, 4, tr(f"Müşteri: {s.get('Müşteri', '')}"))
+        set_ft('', 9)
+        pdf.multi_cell(0, 4, tr(f"Telefon: {s.get('Telefon', '')}"))
+
+        il = str(s.get('İl', '')).strip()
+        ilce = str(s.get('İlçe', '')).strip()
+        adres_metni = str(s.get('Adres', '')).strip()
+        if il and ilce:
+            adres_metni = f"{adres_metni}\n{ilce.upper()} / {il.upper()}"
+
+        pdf.multi_cell(0, 4, tr(f"Adres: {adres_metni}"))
+        
+        pdf.ln(3)
+
+        # Urunler
+        pdf.set_fill_color(240, 240, 240)
+        set_ft('', 9)
+        pdf.cell(0, 5, tr("  ÜRÜN DETAYLARI"), ln=1, fill=True)
+        pdf.ln(1)
+
+        set_ft('B', 9)
+        pdf.multi_cell(0, 4, tr(f"1) {s.get('Ürün 1', '')} ({s.get('Adet 1', '')} Adet)"))
+        if s.get('Ürün 2'):
+            pdf.ln(1)
+            pdf.multi_cell(0, 4, tr(f"2) {s.get('Ürün 2', '')} ({s.get('Adet 2', '')} Adet)"))
+
+        # Barcode
+        if kargo_takip:
+            pdf.ln(10)
+            set_ft('', 9)
+            pdf.cell(0, 4, tr(f"Kargo Takip No: {kargo_takip}"), ln=1, align='C')
+            pdf.ln(2)
+
+            try:
+                api_url = f"https://bwipjs-api.metafloor.com/?bcid=code128&text={kargo_takip}&scale=3&height=12&includetext=false"
+                response = requests.get(api_url, timeout=5)
+                
+                if response.status_code == 200:
+                    fd, tmp_name = tempfile.mkstemp(suffix=".png")
+                    os.close(fd)
+                    with open(tmp_name, 'wb') as f:
+                        f.write(response.content)
+                        
+                    barkod_w = 80
+                    barkod_h = 15
+                    x_pos = (100 - barkod_w) / 2
+                    
+                    pdf.image(tmp_name, x=x_pos, y=pdf.get_y(), w=barkod_w, h=barkod_h)
+                    pdf.set_y(pdf.get_y() + barkod_h + 5)
+                    try: os.remove(tmp_name)
+                    except: pass
+                else:
+                    pdf.code39(kargo_takip, x=10, y=pdf.get_y(), w=1.5, h=15)
+                    pdf.set_y(pdf.get_y() + 20)
+            except Exception as e:
+                print("Barkod olusturulamadi (bulk):", e)
+                try:
+                    pdf.code39(kargo_takip, x=10, y=pdf.get_y(), w=1.5, h=15)
+                    pdf.set_y(pdf.get_y() + 20)
+                except: pass
+
+    return pdf.output(dest='S').encode('latin-1')
+
 def create_pazaryeri_pdf(s, urun_dict):
     pdf = FPDF(format=(100, 150))
     pdf.add_page()
@@ -894,7 +1057,7 @@ def create_pazaryeri_pdf(s, urun_dict):
     pdf.set_fill_color(40, 40, 40)
     pdf.rect(0, 0, 100, 15, 'F')
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font_size(6)
+    pdf.set_font_size(12)
     pdf.text(5, 10, "MINIVAGON - PAZARYERI KART")
     
     pdf.set_font_size(8)
@@ -1164,7 +1327,7 @@ elif menu == "📋 Sipariş Listesi":
                     else:
                         st.success(f"{len(yeni_siparis_satirlari)} adet yeni Trendyol siparişi bulundu!")
 
-                        df_yeni = pd.DataFrame(yeni_siparis_satirlari, columns=["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe", "Kargo Firması"])
+                        df_yeni = pd.DataFrame(yeni_siparis_satirlari, columns=["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe", "Kargo Firması", "Yazdırıldı Durumu"])
                         st.dataframe(df_yeni[["Pazaryeri Siparis No", "Müşteri", "Ürün 1", "Adet 1", "Tutar", "Tarih", "Durum"]], use_container_width=True)
 
                         if st.button("✅ Listeyi Pazaryeri Tablosuna Kaydet", type="primary"):
@@ -1183,25 +1346,99 @@ elif menu == "📋 Sipariş Listesi":
         st.markdown("---")
 
         if not df_pz.empty:
+            if 'Yazdırıldı Durumu' not in df_pz.columns:
+                df_pz['Yazdırıldı Durumu'] = 'YAZDIRILMADI'
+
             df_pz = df_pz.sort_values(by="Tarih", ascending=False)
+            
+            # Sekmeler
+            tab_yeni, tab_yazdirilanlar, tab_tumu = st.tabs(["🆕 Yeni Siparişler (Yazdırılmamış)", "🖨️ Yazdırılanlar", "Tüm Kayıtlar"])
 
-            arama_pz = st.text_input("Pazaryeri Siparişlerinde Ara", key="pz_arama")
-            if arama_pz:
-                df_pz = df_pz[df_pz.astype(str).apply(lambda x: x.str.contains(arama_pz, case=False)).any(axis=1)]
+            with tab_yeni:
+                df_yeni = df_pz[df_pz['Yazdırıldı Durumu'] != 'YAZDIRILDI'].copy()
+                
+                if df_yeni.empty:
+                    st.success("Tüm siparişler yazdırılmış!")
+                else:
+                    st.info("Toplu yazdırmak için siparişleri seçin:")
+                    # Veri gridini editorle goster
+                    df_yeni.insert(0, "Seç", False)
+                    edited_df = st.data_editor(
+                        df_yeni,
+                        hide_index=True,
+                        column_config={
+                            "Seç": st.column_config.CheckboxColumn(
+                                "Seç",
+                                help="Yazdırmak için seçin",
+                                default=False,
+                            )
+                        },
+                        disabled=df_yeni.columns.drop("Seç").tolist(),
+                        use_container_width=True
+                    )
+                    
+                    secili_siparisler = edited_df[edited_df["Seç"] == True]
+                    
+                    if not secili_siparisler.empty:
+                        st.write(f"**{len(secili_siparisler)}** sipariş seçildi.")
+                        
+                        col_btn1, col_btn2 = st.columns([1, 1])
+                        
+                        # PDF olusturma butonlari (tekli veya toplu indirebilmek icin once uretmek gerekebilir, ancak Streamlit download_button datayi onceden ister)
+                        # Bu yuzden formati su sekilde yapmaliyiz: once 'Toplu PDF Olustur' a basilip session'a alinir
+                        if st.button("🖨️ Seçilenleri Yazdır (PDF Oluştur)", type="primary"):
+                            with st.spinner("PDF hazırlanıyor..."):
+                                sip_listesi = secili_siparisler.to_dict('records')
+                                # Ensure Siparis No exists for fallback
+                                for s in sip_listesi:
+                                    s['Siparis No'] = s.get('Pazaryeri Siparis No', '')
+                                    
+                                pdf_data = create_pazaryeri_bulk_pdf(sip_listesi, GUNCEL_URUNLER)
+                                st.session_state['bulk_pdf_data'] = pdf_data
+                                st.session_state['bulk_pdf_siparis_nolar'] = secili_siparisler['Pazaryeri Siparis No'].astype(str).tolist()
+                                st.success("PDF hazır! Aşağıdan indirebilirsiniz.")
 
-            st.dataframe(df_pz, use_container_width=True, hide_index=True)
-            st.divider()
+                        if st.session_state.get('bulk_pdf_data'):
+                            st.download_button(
+                                label="📥 Oluşturulan PDF'i İndir",
+                                data=st.session_state['bulk_pdf_data'],
+                                file_name=f"Pazaryeri_Toplu_{simdi().strftime('%Y%m%d_%H%M')}.pdf",
+                                mime="application/pdf",
+                                type="primary"
+                            )
+                            
+                            # İndir butonunun ardından durum güncelleme butonu
+                            if st.button("✅ İndirdim, 'Yazdırıldı' Olarak İşaretle"):
+                                update_yazdirildi_durumu(st.session_state['bulk_pdf_siparis_nolar'])
+                                del st.session_state['bulk_pdf_data']
+                                del st.session_state['bulk_pdf_siparis_nolar']
+                                st.success("Durumlar güncellendi!")
+                                st.rerun()
 
-            if 'Pazaryeri Siparis No' in df_pz.columns and not df_pz.empty:
-                secenekler_pz = df_pz.apply(lambda x: f"{x['Pazaryeri Siparis No']} - {x['Müşteri']}", axis=1)
-                secilen_pz = st.selectbox("Fiş Yazdır:", secenekler_pz, key="pz_fis")
-                if st.button("📄 FİŞ OLUŞTUR", key="btn_pz_fis"):
-                    s_no_pz = secilen_pz.split(" - ")[0]
-                    sip_pz = df_pz[df_pz['Pazaryeri Siparis No'].astype(str) == str(s_no_pz)].iloc[0].to_dict()
-                    # PDF fonksiyonu Siparis No bekliyor olabilir, geçici olarak ekleyelim
-                    sip_pz['Siparis No'] = sip_pz.get('Pazaryeri Siparis No', '')
-                    pdf_data_pz = create_pazaryeri_pdf(sip_pz, GUNCEL_URUNLER)
-                    st.download_button("📥 İNDİR", pdf_data_pz, f"PazaryeriSiparis_{s_no_pz}.pdf", "application/pdf", type="primary", key="dl_pz_fis")
+            with tab_yazdirilanlar:
+                df_yazdirilanlar = df_pz[df_pz['Yazdırıldı Durumu'] == 'YAZDIRILDI']
+                arama_yz = st.text_input("Yazdırılanlarda Ara", key="yz_arama")
+                if arama_yz:
+                    df_yazdirilanlar = df_yazdirilanlar[df_yazdirilanlar.astype(str).apply(lambda x: x.str.contains(arama_yz, case=False)).any(axis=1)]
+                st.dataframe(df_yazdirilanlar, use_container_width=True, hide_index=True)
+
+            with tab_tumu:
+                arama_pz = st.text_input("Pazaryeri Siparişlerinde Ara", key="pz_arama")
+                if arama_pz:
+                    df_pz = df_pz[df_pz.astype(str).apply(lambda x: x.str.contains(arama_pz, case=False)).any(axis=1)]
+                st.dataframe(df_pz, use_container_width=True, hide_index=True)
+
+                st.divider()
+                st.subheader("Tekli Fiş Yazdır")
+                if 'Pazaryeri Siparis No' in df_pz.columns and not df_pz.empty:
+                    secenekler_pz = df_pz.apply(lambda x: f"{x['Pazaryeri Siparis No']} - {x['Müşteri']}", axis=1)
+                    secilen_pz = st.selectbox("Fiş Yazdır:", secenekler_pz, key="pz_fis")
+                    if st.button("📄 FİŞ OLUŞTUR", key="btn_pz_fis"):
+                        s_no_pz = secilen_pz.split(" - ")[0]
+                        sip_pz = df_pz[df_pz['Pazaryeri Siparis No'].astype(str) == str(s_no_pz)].iloc[0].to_dict()
+                        sip_pz['Siparis No'] = sip_pz.get('Pazaryeri Siparis No', '')
+                        pdf_data_pz = create_pazaryeri_pdf(sip_pz, GUNCEL_URUNLER)
+                        st.download_button("📥 İNDİR", pdf_data_pz, f"PazaryeriSiparis_{s_no_pz}.pdf", "application/pdf", type="primary", key="dl_pz_fis")
         else:
             st.info("Pazaryeri veritabanında henüz kayıt bulunmuyor.")
 
