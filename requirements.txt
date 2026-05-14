@@ -7,3 +7,4 @@ Pillow
 pytz
 plotly
 requests
+tenacity==8.2.3
