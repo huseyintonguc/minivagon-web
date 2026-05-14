@@ -567,15 +567,40 @@ def update_yazdirildi_durumu(siparis_nolar):
         # Sütun endekslerini bul
         try: sip_idx = headers.index("Pazaryeri Siparis No")
         except: return
-        try: yazdir_idx = headers.index("Yazdırıldı Durumu")
-        except: return
+
+        yazdir_idx = -1
+        try:
+            yazdir_idx = headers.index("Yazdırıldı Durumu")
+        except ValueError:
+            # Sütun yoksa, başlıkların sonuna ekleyelim
+            yazdir_idx = len(headers)
+            w.update_cell(1, yazdir_idx + 1, "Yazdırıldı Durumu")
+            # values array'ini güncellemiyoruz, aşağıda indeks dışıysa default olarak davranacağız.
 
         cells_to_update = []
         for i, row in enumerate(values):
             if i == 0: continue
+            # Satırda Pazaryeri Siparis No hücresi var mı kontrolü
             if len(row) > sip_idx:
                 sip_no = str(row[sip_idx]).strip()
-                if sip_no in siparis_nolar:
+                # Debugging için sip_no türünü veya eşleşme durumunu loglayabiliriz
+                # Pandas 'Pazaryeri Siparis No'yu ondalıklı string yapabilir (örn: '8281098675.0' veya int string '8281098675')
+                # O yüzden gelen listeyi string yapıp ondalıklı kısımları atarak eşleştirelim
+
+                clean_sip_no = sip_no
+                if '.' in clean_sip_no and clean_sip_no.endswith('0'):
+                    clean_sip_no = clean_sip_no.split('.')[0]
+
+                match = False
+                for s_no in siparis_nolar:
+                    clean_s_no = str(s_no).strip()
+                    if '.' in clean_s_no and clean_s_no.endswith('0'):
+                        clean_s_no = clean_s_no.split('.')[0]
+                    if clean_s_no == clean_sip_no or s_no == sip_no:
+                        match = True
+                        break
+
+                if match:
                     # gspread cell indexing is 1-based
                     cells_to_update.append(gspread.Cell(row=i+1, col=yazdir_idx+1, value="YAZDIRILDI"))
 
@@ -583,6 +608,8 @@ def update_yazdirildi_durumu(siparis_nolar):
             w.update_cells(cells_to_update)
             cache_temizle()
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print("Hata:", e)
 
 def cari_islem_ekle(satir):
