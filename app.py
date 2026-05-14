@@ -933,7 +933,7 @@ def create_pazaryeri_bulk_pdf(siparisler, urun_dict):
         pdf.set_fill_color(40, 40, 40)
         pdf.rect(0, 0, 100, 15, 'F')
         pdf.set_text_color(255, 255, 255)
-        pdf.set_font_size(12)
+        set_ft('B', 12)
         pdf.text(5, 10, "MINIVAGON - PAZARYERI KART")
 
         pdf.set_font_size(8)
@@ -1057,7 +1057,7 @@ def create_pazaryeri_pdf(s, urun_dict):
     pdf.set_fill_color(40, 40, 40)
     pdf.rect(0, 0, 100, 15, 'F')
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font_size(12)
+    set_ft('B', 12)
     pdf.text(5, 10, "MINIVAGON - PAZARYERI KART")
 
     pdf.set_font_size(8)
