@@ -438,12 +438,14 @@ def format_trendyol_orders(orders, existing_db_df):
 
 # --- GOOGLE SHEETS BAĞLANTISI ---
 @st.cache_resource
+@st.cache_resource(ttl=3600)
 def get_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_dict = dict(st.secrets["gcp_service_account"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
+@st.cache_resource(ttl=3600)
 def get_sheet():
     client = get_client()
     return client.open(SHEET_ADI)
@@ -555,63 +557,66 @@ def pazaryeri_siparis_toplu_ekle(satirlar):
 
 
 
+from tenacity import retry, wait_exponential, stop_after_attempt
+
+@retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
+def _do_update_yazdirildi(siparis_nolar):
+    sh = get_sheet()
+    w = sh.worksheet("PazaryeriSiparisleri")
+    values = w.get_all_values()
+    if len(values) < 2: return
+    headers = values[0]
+    
+    # Sütun endekslerini bul
+    try: sip_idx = headers.index("Pazaryeri Siparis No")
+    except: return
+    
+    yazdir_idx = -1
+    try: 
+        yazdir_idx = headers.index("Yazdırıldı Durumu")
+    except ValueError:
+        yazdir_idx = len(headers)
+        w.update_cell(1, yazdir_idx + 1, "Yazdırıldı Durumu")
+        
+        # Tabloya yeni sütun eklediğimiz için row/col sayısını kontrol edelim ve gerekirse genişletelim
+        try:
+            if w.col_count < yazdir_idx + 1:
+                w.add_cols(1)
+        except: pass
+    
+    cells_to_update = []
+    for i, row in enumerate(values):
+        if i == 0: continue
+        if len(row) > sip_idx:
+            sip_no = str(row[sip_idx]).strip()
+            clean_sip_no = sip_no
+            if '.' in clean_sip_no and clean_sip_no.endswith('0'):
+                clean_sip_no = clean_sip_no.split('.')[0]
+            
+            match = False
+            for s_no in siparis_nolar:
+                clean_s_no = str(s_no).strip()
+                if '.' in clean_s_no and clean_s_no.endswith('0'):
+                    clean_s_no = clean_s_no.split('.')[0]
+                if clean_s_no == clean_sip_no or s_no == sip_no:
+                    match = True
+                    break
+
+            if match:
+                cells_to_update.append(gspread.Cell(row=i+1, col=yazdir_idx+1, value="YAZDIRILDI"))
+    
+    if cells_to_update:
+        try:
+            w.update_cells(cells_to_update)
+        except Exception as e:
+            for cell in cells_to_update:
+                w.update_cell(cell.row, cell.col, cell.value)
+        cache_temizle()
+
 def update_yazdirildi_durumu(siparis_nolar):
     if not siparis_nolar: return
-    sh = get_sheet()
     try:
-        w = sh.worksheet("PazaryeriSiparisleri")
-        values = w.get_all_values()
-        if len(values) < 2: return
-        headers = values[0]
-        
-        # Sütun endekslerini bul
-        try: sip_idx = headers.index("Pazaryeri Siparis No")
-        except: return
-        
-        yazdir_idx = -1
-        try: 
-            yazdir_idx = headers.index("Yazdırıldı Durumu")
-        except ValueError:
-            yazdir_idx = len(headers)
-            w.update_cell(1, yazdir_idx + 1, "Yazdırıldı Durumu")
-            
-            # Tabloya yeni sütun eklediğimiz için row/col sayısını kontrol edelim ve gerekirse genişletelim
-            try:
-                if w.col_count < yazdir_idx + 1:
-                    w.add_cols(1)
-            except: pass
-        
-        cells_to_update = []
-        for i, row in enumerate(values):
-            if i == 0: continue
-            if len(row) > sip_idx:
-                sip_no = str(row[sip_idx]).strip()
-                clean_sip_no = sip_no
-                if '.' in clean_sip_no and clean_sip_no.endswith('0'):
-                    clean_sip_no = clean_sip_no.split('.')[0]
-                
-                match = False
-                for s_no in siparis_nolar:
-                    clean_s_no = str(s_no).strip()
-                    if '.' in clean_s_no and clean_s_no.endswith('0'):
-                        clean_s_no = clean_s_no.split('.')[0]
-                    if clean_s_no == clean_sip_no or s_no == sip_no:
-                        match = True
-                        break
-
-                if match:
-                    cells_to_update.append(gspread.Cell(row=i+1, col=yazdir_idx+1, value="YAZDIRILDI"))
-        
-        if cells_to_update:
-            # Sınır dışı güncellemeleri önlemek için add_cols() ve add_rows() kullanılmış olabilir,
-            # yine de tek tek yaparsak range hatalarını ayıklamak daha kolay olur.
-            try:
-                w.update_cells(cells_to_update)
-            except Exception as e:
-                # Toplu güncelleme hata verirse tek tek güncellemeyi deneyelim
-                for cell in cells_to_update:
-                    w.update_cell(cell.row, cell.col, cell.value)
-            cache_temizle()
+        _do_update_yazdirildi(siparis_nolar)
     except Exception as e:
         import traceback
         traceback.print_exc()
