@@ -572,21 +572,20 @@ def update_yazdirildi_durumu(siparis_nolar):
         try:
             yazdir_idx = headers.index("Yazdırıldı Durumu")
         except ValueError:
-            # Sütun yoksa, başlıkların sonuna ekleyelim
             yazdir_idx = len(headers)
             w.update_cell(1, yazdir_idx + 1, "Yazdırıldı Durumu")
-            # values array'ini güncellemiyoruz, aşağıda indeks dışıysa default olarak davranacağız.
+
+            # Tabloya yeni sütun eklediğimiz için row/col sayısını kontrol edelim ve gerekirse genişletelim
+            try:
+                if w.col_count < yazdir_idx + 1:
+                    w.add_cols(1)
+            except: pass
 
         cells_to_update = []
         for i, row in enumerate(values):
             if i == 0: continue
-            # Satırda Pazaryeri Siparis No hücresi var mı kontrolü
             if len(row) > sip_idx:
                 sip_no = str(row[sip_idx]).strip()
-                # Debugging için sip_no türünü veya eşleşme durumunu loglayabiliriz
-                # Pandas 'Pazaryeri Siparis No'yu ondalıklı string yapabilir (örn: '8281098675.0' veya int string '8281098675')
-                # O yüzden gelen listeyi string yapıp ondalıklı kısımları atarak eşleştirelim
-
                 clean_sip_no = sip_no
                 if '.' in clean_sip_no and clean_sip_no.endswith('0'):
                     clean_sip_no = clean_sip_no.split('.')[0]
@@ -601,11 +600,17 @@ def update_yazdirildi_durumu(siparis_nolar):
                         break
 
                 if match:
-                    # gspread cell indexing is 1-based
                     cells_to_update.append(gspread.Cell(row=i+1, col=yazdir_idx+1, value="YAZDIRILDI"))
 
         if cells_to_update:
-            w.update_cells(cells_to_update)
+            # Sınır dışı güncellemeleri önlemek için add_cols() ve add_rows() kullanılmış olabilir,
+            # yine de tek tek yaparsak range hatalarını ayıklamak daha kolay olur.
+            try:
+                w.update_cells(cells_to_update)
+            except Exception as e:
+                # Toplu güncelleme hata verirse tek tek güncellemeyi deneyelim
+                for cell in cells_to_update:
+                    w.update_cell(cell.row, cell.col, cell.value)
             cache_temizle()
     except Exception as e:
         import traceback
