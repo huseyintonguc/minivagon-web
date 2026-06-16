@@ -436,6 +436,49 @@ def format_trendyol_orders(orders, existing_db_df):
 
     return formatted_list
 
+def ciceksepeti_efatura_gonder(order_item_id, pdf_b64=None, pdf_url=None):
+    """Çiçeksepeti faturasını API üzerinden gönderir."""
+    try:
+        if "ciceksepeti" not in st.secrets:
+            return None, "st.secrets içinde [ciceksepeti] ayarı bulunamadı."
+            
+        ciceksepeti_secrets = st.secrets["ciceksepeti"]
+        api_key = ciceksepeti_secrets.get("api_key")
+
+        if not api_key:
+            return None, "Çiçeksepeti API bilgileri (api_key) st.secrets içinde eksik!"
+
+        url = "https://apis.ciceksepeti.com/api/v1/Branch/SendInvoiceMail"
+        headers = {
+            "x-api-key": api_key,
+            "Content-Type": "application/json"
+        }
+        
+        item = {"orderItemId": int(order_item_id)}
+        if pdf_b64:
+            item["document"] = pdf_b64
+        elif pdf_url:
+            item["documentUrl"] = pdf_url
+        else:
+            return None, "Fatura dokümanı veya URL'si belirtilmedi."
+
+        payload = {
+            "items": [item]
+        }
+
+        response = requests.post(url, headers=headers, json=payload)
+        
+        if response.status_code == 200:
+            try:
+                res_data = response.json()
+            except:
+                res_data = response.text
+            return res_data, "BAŞARILI"
+        else:
+            return None, f"Çiçeksepeti Fatura Gönderim Hatası: {response.status_code} - {response.text}"
+    except Exception as e:
+        return None, f"Sistem Hatası: {str(e)}"
+
 # --- GOOGLE SHEETS BAĞLANTISI ---
 @st.cache_resource
 @st.cache_resource(ttl=3600)
@@ -1327,10 +1370,16 @@ elif menu == "📋 Sipariş Listesi":
     with tab_pazaryeri:
         st.subheader("Trendyol ve Diğer Pazaryeri Siparişleri")
 
-        c_p1, c_p2 = st.columns([2, 1])
+        c_p1, c_p2, c_p3 = st.columns([1, 1, 1])
         with c_p2:
-            if st.button("🔄 Trendyol Siparişlerini Çek", use_container_width=True):
+            if st.button("🔄 Trendyol Siparişleri", use_container_width=True):
                 st.session_state["ty_cekildi"] = True
+                st.session_state["cs_cekildi"] = False
+        with c_p3:
+            if st.button("🌺 Çiçeksepeti Siparişleri", use_container_width=True):
+                st.session_state["cs_cekildi"] = True
+                st.session_state["ty_cekildi"] = False
+
 
         data_pz = verileri_getir("PazaryeriSiparisleri")
         df_pz = pd.DataFrame(data_pz) if data_pz else pd.DataFrame()
@@ -1379,6 +1428,41 @@ elif menu == "📋 Sipariş Listesi":
                                 st.error(f"Kaydedilirken hata oluştu: {e}")
                 elif msg:
                     st.error(msg)
+        if st.session_state.get("cs_cekildi", False):
+            with st.expander("🌺 Çiçeksepeti'nden Çekilen Yeni Siparişler", expanded=True):
+                c_d1, c_d2 = st.columns(2)
+                bas_tarih = c_d1.date_input("Başlangıç Tarihi", simdi().date() - timedelta(days=7), key="cs_bas")
+                bit_tarih = c_d2.date_input("Bitiş Tarihi", simdi().date(), key="cs_bit")
+                if st.button("Çiçeksepeti Siparişlerini Getir", key="cs_getir"):
+                    with st.spinner("Çiçeksepeti'nden siparişler çekiliyor..."):
+                        bas_iso = datetime.combine(bas_tarih, datetime.min.time()).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                        bit_iso = datetime.combine(bit_tarih, datetime.max.time()).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                        cs_orders, msg = fetch_ciceksepeti_orders(start_date_iso=bas_iso, end_date_iso=bit_iso)
+                        st.session_state["cs_orders_temp"] = cs_orders
+                        st.session_state["cs_msg_temp"] = msg
+                cs_orders = st.session_state.get("cs_orders_temp")
+                msg = st.session_state.get("cs_msg_temp")
+                if cs_orders is not None:
+                    yeni_siparis_satirlari = format_ciceksepeti_orders(cs_orders, df_pz if not df_pz.empty else None)
+                    if not yeni_siparis_satirlari:
+                        st.info("Yeni bir Çiçeksepeti siparişi bulunamadı (Hepsi zaten sistemde olabilir).")
+                    else:
+                        st.success(f"{len(yeni_siparis_satirlari)} adet yeni Çiçeksepeti siparişi bulundu!")
+                        df_yeni = pd.DataFrame(yeni_siparis_satirlari, columns=["Pazaryeri Siparis No","Tarih","Durum","Müşteri","Telefon","TC No","Mail","Ürün 1","Adet 1","İsim 1","Ürün 2","Adet 2","İsim 2","Tutar","Ödeme","Kaynak","Adres","Kargo Takip No","Fatura Durumu","Tedarik Durumu", "İl", "İlçe", "Kargo Firması", "Yazdırıldı Durumu"])
+                        st.dataframe(df_yeni[["Pazaryeri Siparis No", "Müşteri", "Ürün 1", "Adet 1", "Tutar", "Tarih", "Durum"]], use_container_width=True)
+                        if st.button("✅ Listeyi Pazaryeri Tablosuna Kaydet", type="primary", key="cs_kaydet"):
+                            try:
+                                pazaryeri_siparis_toplu_ekle(yeni_siparis_satirlari)
+                                st.success(f"{len(yeni_siparis_satirlari)} yeni sipariş Pazaryeri veritabanına başarıyla kaydedildi!")
+                                st.session_state["cs_cekildi"] = False
+                                if "cs_orders_temp" in st.session_state:
+                                    del st.session_state["cs_orders_temp"]
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Kaydedilirken hata oluştu: {e}")
+                elif msg:
+                    st.error(msg)
+
 
         st.markdown("---")
 
@@ -1498,7 +1582,7 @@ elif menu == "🧾 Fatura Takibi":
                         secenekler = bekleyenler.apply(lambda x: f"{x['Siparis No']} - {x['Müşteri']} ({x['Tutar']})", axis=1).tolist()
                         secilen_faturalar = st.multiselect("İşlem Yapılacak Siparişleri Seç:", secenekler)
 
-                        col_f1, col_f2 = st.columns(2)
+                        col_f1, col_f2, col_f3 = st.columns(3)
                         with col_f1:
                             if st.button("Manuel Kesildi İşaretle", use_container_width=True):
                                 if secilen_faturalar:
@@ -1508,6 +1592,65 @@ elif menu == "🧾 Fatura Takibi":
                                         st.success("Güncellendi!")
                                         st.rerun()
                                     else: st.error(sonuc)
+                                    
+                        with col_f3:
+                            with st.popover("🌺 Çiçeksepeti Fatura Yükle", use_container_width=True):
+                                st.info("Sadece Çiçeksepeti siparişleri için geçerlidir.")
+                                uploaded_pdfs = st.file_uploader("Çiçeksepeti Faturası (PDF)", type=["pdf"], accept_multiple_files=True)
+                                
+                                if st.button("Çiçeksepeti'ne Gönder", type="primary", use_container_width=True):
+                                    if not uploaded_pdfs:
+                                        st.warning("Lütfen en az 1 PDF dosyası yükleyin!")
+                                    elif not secilen_faturalar:
+                                        st.warning("Lütfen işlem yapılacak siparişi seçin!")
+                                    elif len(uploaded_pdfs) != len(secilen_faturalar):
+                                        st.warning("Seçilen sipariş sayısı ile yüklenen PDF sayısı eşleşmiyor!")
+                                    else:
+                                        basarili_cs_nolar = []
+                                        siparis_nolar = [int(s.split(" - ")[0]) for s in secilen_faturalar]
+                                        
+                                        import base64
+                                        
+                                        # Sort the selected siparis nolar to have a deterministic order.
+                                        # Assuming users match the files alphabetically or in some predictable sequence.
+                                        # Or better, we can show a mapping to the user before sending.
+                                        # But for automated matching via multiselect/uploader, we assume the user uploads in the same order as selection,
+                                        # or we attempt to match filename with order number.
+                                        
+                                        for uploaded_pdf in uploaded_pdfs:
+                                            filename = uploaded_pdf.name
+                                            # Try to find the sip_no in the filename
+                                            matched_sip_no = None
+                                            for sip_no in siparis_nolar:
+                                                if str(sip_no) in filename:
+                                                    matched_sip_no = sip_no
+                                                    break
+                                            
+                                            # If not matched by filename, we fallback to index based matching if it's the only option,
+                                            # but safer to require naming convention.
+                                            if matched_sip_no is None:
+                                                # Just use the first available from the list that hasn't been used yet for simplicity in this fallback
+                                                if len(siparis_nolar) > 0:
+                                                    matched_sip_no = siparis_nolar.pop(0)
+                                                else:
+                                                    continue
+                                            else:
+                                                siparis_nolar.remove(matched_sip_no)
+                                                
+                                            pdf_bytes = uploaded_pdf.read()
+                                            cs_pdf_b64 = base64.b64encode(pdf_bytes).decode('utf-8')
+                                            
+                                            resp, cs_msg = ciceksepeti_efatura_gonder(order_item_id=matched_sip_no, pdf_b64=cs_pdf_b64)
+                                            if cs_msg == "BAŞARILI":
+                                                basarili_cs_nolar.append(matched_sip_no)
+                                                st.success(f"#{matched_sip_no} Çiçeksepeti'ne başarıyla yüklendi! (Dosya: {filename})")
+                                            else:
+                                                st.error(f"#{matched_sip_no} Gönderim Hatası (Dosya: {filename}): {cs_msg}")
+                                                
+                                        if basarili_cs_nolar:
+                                            fatura_durumunu_kesildi_yap(basarili_cs_nolar)
+                                            st.info("Kayıtlar güncellendi.")
+                                        
                         with col_f2:
                             if st.button("⚡ Trendyol E-Fatura Kes", type="primary", use_container_width=True):
                                 if secilen_faturalar:
