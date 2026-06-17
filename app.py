@@ -307,6 +307,92 @@ def create_efatura_payload(siparis, user_id=None, company_id=None):
 
     return payload
 
+# --- ÇİÇEKSEPETİ API BAĞLANTISI ---
+def fetch_ciceksepeti_orders(start_date_iso=None, end_date_iso=None):
+    try:
+        if "ciceksepeti" not in st.secrets:
+            return None, "st.secrets içinde [ciceksepeti] ayarı bulunamadı."
+
+        ciceksepeti_secrets = st.secrets["ciceksepeti"]
+        api_key = ciceksepeti_secrets.get("api_key")
+
+        if not api_key:
+            return None, "Çiçeksepeti API bilgileri (api_key) st.secrets içinde eksik!"
+
+        url = "https://apis.ciceksepeti.com/api/v1/Order/GetOrders"
+        headers = {
+            "x-api-key": api_key,
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "pageSize": 100,
+            "page": 0
+        }
+        
+        if start_date_iso and end_date_iso:
+            payload["startDate"] = start_date_iso
+            payload["endDate"] = end_date_iso
+            
+        response = requests.post(url, headers=headers, json=payload)
+        
+        if response.status_code == 200:
+            try:
+                res_data = response.json()
+                if isinstance(res_data, dict) and "supplierOrderListWithBranch" in res_data:
+                    return res_data.get("supplierOrderListWithBranch", []), "BAŞARILI"
+                return res_data, "BAŞARILI"
+            except:
+                return [], "BAŞARILI"
+        else:
+            return None, f"Çiçeksepeti Hatası: {response.status_code} - {response.text}"
+    except Exception as e:
+        return None, f"Sistem Hatası: {str(e)}"
+
+def ciceksepeti_efatura_gonder(order_item_id, pdf_b64=None, pdf_url=None):
+    """Çiçeksepeti faturasını API üzerinden gönderir."""
+    try:
+        if "ciceksepeti" not in st.secrets:
+            return None, "st.secrets içinde [ciceksepeti] ayarı bulunamadı."
+            
+        ciceksepeti_secrets = st.secrets["ciceksepeti"]
+        api_key = ciceksepeti_secrets.get("api_key")
+
+        if not api_key:
+            return None, "Çiçeksepeti API bilgileri (api_key) st.secrets içinde eksik!"
+
+        url = "https://apis.ciceksepeti.com/api/v1/Branch/SendInvoiceMail"
+        headers = {
+            "x-api-key": api_key,
+            "Content-Type": "application/json"
+        }
+        
+        item = {"orderItemId": int(order_item_id)}
+        if pdf_b64:
+            item["document"] = pdf_b64
+        elif pdf_url:
+            item["documentUrl"] = pdf_url
+        else:
+            return None, "Fatura dokümanı veya URL'si belirtilmedi."
+
+        payload = {
+            "items": [item]
+        }
+
+        response = requests.post(url, headers=headers, json=payload)
+        
+        if response.status_code == 200:
+            try:
+                res_data = response.json()
+            except:
+                res_data = response.text
+            return res_data, "BAŞARILI"
+        else:
+            return None, f"Çiçeksepeti Fatura Gönderim Hatası: {response.status_code} - {response.text}"
+    except Exception as e:
+        return None, f"Sistem Hatası: {str(e)}"
+
+
 # --- TRENDYOL API BAĞLANTISI ---
 def fetch_trendyol_orders(start_date_ms=None, end_date_ms=None, status=None):
     try:
