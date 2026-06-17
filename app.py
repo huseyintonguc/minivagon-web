@@ -31,16 +31,16 @@ def check_login():
     import secrets
     correct_username = auth_secrets.get("username", secrets.token_hex(16))
     correct_password = auth_secrets.get("password", secrets.token_hex(16))
-    
+
     st.markdown("<h2 style='text-align: center; color: #4A90E2;'>MiniVagon Bulut Girişi</h2>", unsafe_allow_html=True)
-    
+
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         with st.form("login_form"):
             username = st.text_input("Kullanıcı Adı")
             password = st.text_input("Şifre", type="password")
             submitted = st.form_submit_button("Giriş Yap", use_container_width=True)
-            
+
             if submitted:
                 if username == correct_username and password == correct_password:
                     st.session_state["logged_in"] = True
@@ -51,7 +51,7 @@ def check_login():
 if not st.session_state["logged_in"]:
     check_login()
     st.stop() # Uygulamanın geri kalanının çalışmasını durdur
-    
+
 # Geri kalan kod (Sadece giriş yapıldıysa çalışır)
 st.sidebar.markdown(f"👤 **Hoşgeldiniz, {st.secrets.get('auth', {}).get('username', 'admin')}**")
 if st.sidebar.button("🚪 Çıkış Yap"):
@@ -436,6 +436,131 @@ def format_trendyol_orders(orders, existing_db_df):
 
     return formatted_list
 
+
+
+def fetch_ciceksepeti_orders(start_date_iso=None, end_date_iso=None):
+    try:
+        if "ciceksepeti" not in st.secrets:
+            return None, "st.secrets içinde [ciceksepeti] ayarı bulunamadı."
+
+        ciceksepeti_secrets = st.secrets["ciceksepeti"]
+        api_key = ciceksepeti_secrets.get("api_key")
+
+        if not api_key:
+            return None, "Çiçeksepeti API bilgileri (api_key) st.secrets içinde eksik!"
+
+        url = "https://apis.ciceksepeti.com/api/v1/Order/GetOrders"
+        headers = {
+            "x-api-key": api_key,
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "pageSize": 100,
+            "page": 0
+        }
+
+        if start_date_iso and end_date_iso:
+            payload["startDate"] = start_date_iso
+            payload["endDate"] = end_date_iso
+
+        response = requests.post(url, headers=headers, json=payload)
+
+        if response.status_code == 200:
+            try:
+                res_data = response.json()
+                if isinstance(res_data, dict) and "supplierOrderListWithBranch" in res_data:
+                    return res_data.get("supplierOrderListWithBranch", []), "BAŞARILI"
+                return res_data, "BAŞARILI"
+            except:
+                return [], "BAŞARILI"
+        else:
+            return None, f"Çiçeksepeti Hatası: {response.status_code} - {response.text}"
+    except Exception as e:
+        return None, f"Sistem Hatası: {str(e)}"
+
+def format_ciceksepeti_orders(orders, existing_db_df):
+    """Çiçeksepeti siparişlerini sisteme uygun formata (PazaryeriSiparisleri sayfasına) dönüştürür."""
+    formatted_list = []
+
+    existing_order_notes = []
+    if existing_db_df is not None and not existing_db_df.empty and 'Pazaryeri Siparis No' in existing_db_df.columns:
+        existing_order_notes = existing_db_df['Pazaryeri Siparis No'].astype(str).tolist()
+
+    for order in orders:
+        # SendInvoiceMail endpoint explicitly requires orderItemId instead of orderId
+        cs_order_no = str(order.get('orderItemId', order.get('orderNo', order.get('orderId', ''))))
+
+        if not cs_order_no or cs_order_no in existing_order_notes:
+            continue
+
+        receiver = order.get('receiver', {})
+        sender = order.get('sender', {})
+        musteri_adi = receiver.get('fullName', order.get('receiverName', sender.get('fullName', ''))).strip()
+        tel = receiver.get('phone', order.get('receiverPhone', ''))
+
+        adres_str = order.get('receiverAddress', order.get('deliveryAddress', order.get('shippingAddress', '')))
+        if isinstance(adres_str, dict):
+            il = adres_str.get('city', '')
+            ilce = adres_str.get('district', '')
+            adres_str = adres_str.get('address', '')
+        else:
+            il = order.get('receiverCity', order.get('deliveryCity', ''))
+            ilce = order.get('receiverDistrict', order.get('deliveryDistrict', ''))
+            adres_str = str(adres_str)
+
+        tc = order.get('invoiceAddress', {}).get('tcIdentityNumber', order.get('taxNumber', ''))
+        mail = order.get('customerEmail', order.get('senderEmail', ''))
+
+        tarih_val = order.get('orderDate', order.get('orderCreateDate', ''))
+        tarih = simdi().strftime("%d.%m.%Y %H:%M")
+        if tarih_val:
+            if isinstance(tarih_val, (int, float)):
+                try:
+                    tarih = datetime.fromtimestamp(tarih_val/1000).strftime("%d.%m.%Y %H:%M")
+                except: pass
+            else:
+                try:
+                    from dateutil import parser
+                    tarih = parser.parse(tarih_val).strftime("%d.%m.%Y %H:%M")
+                except: pass
+
+        lines = order.get('orderItems', order.get('items', []))
+
+        u1, a1, i1 = "", 0, ""
+        u2, a2, i2 = "", 0, ""
+        toplam_tutar = order.get('totalPrice', order.get('paymentAmount', 0))
+
+        if len(lines) > 0:
+            u1 = lines[0].get('productName', lines[0].get('name', ''))
+            a1 = lines[0].get('quantity', lines[0].get('count', 0))
+        if len(lines) > 1:
+            u2 = lines[1].get('productName', lines[1].get('name', ''))
+            a2 = lines[1].get('quantity', lines[1].get('count', 0))
+        if len(lines) > 2:
+            i1 = "Çiçeksepeti panelinden kontrol ediniz (3+ ürün)"
+
+        durum = "YENİ SİPARİŞ"
+
+        odeme = "CICEKSEPETI"
+        kaynak = "Çiçeksepeti"
+        fatura = "KESİLMEDİ"
+        tedarik = "BEKLİYOR"
+        kargo_takip = str(order.get('cargoTrackingNumber', order.get('trackingNumber', ''))).strip()
+        kargo_firmasi = str(order.get('cargoProviderName', order.get('cargoCompany', ''))).strip()
+
+        yazdirildi = "YAZDIRILMADI"
+        satir = [
+            cs_order_no, tarih, durum, musteri_adi, tel, tc, mail,
+            u1, a1, i1, u2, a2, i2, toplam_tutar, odeme, kaynak,
+            adres_str, kargo_takip, fatura, tedarik, il, ilce, kargo_firmasi, yazdirildi
+        ]
+
+        formatted_list.append(satir)
+
+    return formatted_list
+
+
 def ciceksepeti_efatura_gonder(order_item_id, pdf_b64=None, pdf_url=None):
     """Çiçeksepeti faturasını API üzerinden gönderir."""
     try:
@@ -609,24 +734,24 @@ def _do_update_yazdirildi(siparis_nolar):
     values = w.get_all_values()
     if len(values) < 2: return
     headers = values[0]
-    
+
     # Sütun endekslerini bul
     try: sip_idx = headers.index("Pazaryeri Siparis No")
     except: return
-    
+
     yazdir_idx = -1
-    try: 
+    try:
         yazdir_idx = headers.index("Yazdırıldı Durumu")
     except ValueError:
         yazdir_idx = len(headers)
         w.update_cell(1, yazdir_idx + 1, "Yazdırıldı Durumu")
-        
+
         # Tabloya yeni sütun eklediğimiz için row/col sayısını kontrol edelim ve gerekirse genişletelim
         try:
             if w.col_count < yazdir_idx + 1:
                 w.add_cols(1)
         except: pass
-    
+
     cells_to_update = []
     for i, row in enumerate(values):
         if i == 0: continue
@@ -635,7 +760,7 @@ def _do_update_yazdirildi(siparis_nolar):
             clean_sip_no = sip_no
             if '.' in clean_sip_no and clean_sip_no.endswith('0'):
                 clean_sip_no = clean_sip_no.split('.')[0]
-            
+
             match = False
             for s_no in siparis_nolar:
                 clean_s_no = str(s_no).strip()
@@ -647,7 +772,7 @@ def _do_update_yazdirildi(siparis_nolar):
 
             if match:
                 cells_to_update.append(gspread.Cell(row=i+1, col=yazdir_idx+1, value="YAZDIRILDI"))
-    
+
     if cells_to_update:
         try:
             w.update_cells(cells_to_update)
@@ -834,7 +959,7 @@ def create_pdf(s, urun_dict):
     pdf = FPDF(format=(100, 150))
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=5)
-    
+
     # Arial fontunun kalın, italik versiyonlarını da eklememiz gerekiyor (bold, italic için)
     # Eğer font dosyaları yoksa fpdf hata vermez ama set_font('ArialTR', 'B') çalışmaz
     # Bu yüzden sadece normal metin için ArialTR kullanıp, diğerleri için fpdf standart fontlarını kullanabilir veya hepsini ArialTR (normal) yapabiliriz
@@ -849,16 +974,16 @@ def create_pdf(s, urun_dict):
 
     pdf.set_fill_color(40, 40, 40)
     pdf.rect(0, 0, 100, 20, 'F')
-    
+
     pdf.set_text_color(255, 255, 255)
     pdf.set_font_size(14)
     pdf.text(5, 13, "MINIVAGON")
-    
+
     pdf.set_font_size(8)
     pdf.set_text_color(200, 200, 200)
     pdf.text(55, 8, f"Siparis No: #{s.get('Siparis No')}")
     pdf.text(55, 14, f"Tarih: {s.get('Tarih')}")
-    
+
     def resim_koy(u_adi, x_pos):
         if u_adi in urun_dict:
             dosya_adi = urun_dict[u_adi]
@@ -873,10 +998,10 @@ def create_pdf(s, urun_dict):
                 except Exception as e:
                     print("Resim hatasi:", e)
 
-    if s.get('Ürün 2'): 
+    if s.get('Ürün 2'):
         resim_koy(s.get('Ürün 1'), 5)
         resim_koy(s.get('Ürün 2'), 55)
-    else: 
+    else:
         resim_koy(s.get('Ürün 1'), 30)
 
     pdf.set_y(65)
@@ -924,7 +1049,7 @@ def create_pdf(s, urun_dict):
     set_ft('', 10)
 
     odeme_turu = str(s.get('Ödeme', '')).upper()
-    
+
     # Store current Y to draw rect correctly
     y_start = pdf.get_y()
     if "KAPIDA" in odeme_turu:
@@ -948,13 +1073,13 @@ def create_pdf(s, urun_dict):
         pdf.cell(0, 6, tr("ÖDEMESİ ALINDI - TAHSİLAT YOK"), ln=1)
         pdf.set_text_color(0, 0, 0)
         set_ft('', 9)
-        
+
     pdf.set_y(y_start + 16)
 
     pdf.set_fill_color(240, 240, 240)
     pdf.cell(0, 6, tr("  MÜŞTERİ BİLGİLERİ"), ln=1, fill=True)
     pdf.ln(1)
-    
+
     set_ft('B', 9)
     pdf.multi_cell(0, 4, tr(f"Müşteri: {s.get('Müşteri')}"))
     set_ft('', 9)
@@ -984,7 +1109,7 @@ def create_pdf(s, urun_dict):
 def create_pazaryeri_bulk_pdf(siparisler, urun_dict):
     pdf = FPDF(format=(100, 150))
     pdf.set_auto_page_break(auto=True, margin=5)
-    
+
     try:
         pdf.add_font('ArialTR', '', 'arial.ttf', uni=True)
         pdf.add_font('ArialTR', 'B', 'arial.ttf', uni=True)
@@ -1008,19 +1133,19 @@ def create_pazaryeri_bulk_pdf(siparisler, urun_dict):
 
     for s in siparisler:
         pdf.add_page()
-        
+
         # Header
         pdf.set_fill_color(40, 40, 40)
         pdf.rect(0, 0, 100, 15, 'F')
         pdf.set_text_color(255, 255, 255)
         set_ft('B', 12)
         pdf.text(5, 10, "MINIVAGON - PAZARYERI KART")
-        
+
         pdf.set_font_size(8)
         pdf.set_text_color(200, 200, 200)
         pdf.text(60, 10, f"Tarih: {s.get('Tarih', '')}")
         pdf.set_text_color(0, 0, 0)
-        
+
         kargo_takip = str(s.get('Kargo Takip No', '')).strip()
         if 'E' in kargo_takip.upper():
             try:
@@ -1045,7 +1170,7 @@ def create_pazaryeri_bulk_pdf(siparisler, urun_dict):
         set_ft('', 9)
         pdf.cell(0, 5, tr("  MÜŞTERİ BİLGİLERİ"), ln=1, fill=True)
         pdf.ln(1)
-        
+
         set_ft('B', 9)
         pdf.multi_cell(0, 4, tr(f"Müşteri: {s.get('Müşteri', '')}"))
         set_ft('', 9)
@@ -1058,7 +1183,7 @@ def create_pazaryeri_bulk_pdf(siparisler, urun_dict):
             adres_metni = f"{adres_metni}\n{ilce.upper()} / {il.upper()}"
 
         pdf.multi_cell(0, 4, tr(f"Adres: {adres_metni}"))
-        
+
         pdf.ln(3)
 
         # Urunler
@@ -1083,17 +1208,17 @@ def create_pazaryeri_bulk_pdf(siparisler, urun_dict):
             try:
                 api_url = f"https://bwipjs-api.metafloor.com/?bcid=code128&text={kargo_takip}&scale=3&height=12&includetext=false"
                 response = requests.get(api_url, timeout=5)
-                
+
                 if response.status_code == 200:
                     fd, tmp_name = tempfile.mkstemp(suffix=".png")
                     os.close(fd)
                     with open(tmp_name, 'wb') as f:
                         f.write(response.content)
-                        
+
                     barkod_w = 80
                     barkod_h = 15
                     x_pos = (100 - barkod_w) / 2
-                    
+
                     pdf.image(tmp_name, x=x_pos, y=pdf.get_y(), w=barkod_w, h=barkod_h)
                     pdf.set_y(pdf.get_y() + barkod_h + 5)
                     try: os.remove(tmp_name)
@@ -1114,7 +1239,7 @@ def create_pazaryeri_pdf(s, urun_dict):
     pdf = FPDF(format=(100, 150))
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=5)
-    
+
     try:
         pdf.add_font('ArialTR', '', 'arial.ttf', uni=True)
         pdf.add_font('ArialTR', 'B', 'arial.ttf', uni=True)
@@ -1139,14 +1264,14 @@ def create_pazaryeri_pdf(s, urun_dict):
     pdf.set_text_color(255, 255, 255)
     set_ft('B', 12)
     pdf.text(5, 10, "MINIVAGON - PAZARYERI KART")
-    
+
     pdf.set_font_size(8)
     pdf.set_text_color(200, 200, 200)
     pdf.text(60, 10, f"Tarih: {s.get('Tarih')}")
     pdf.set_text_color(0, 0, 0)
-    
+
     kargo_takip = str(s.get('Kargo Takip No', '')).strip()
-    
+
     # Bilimsel gösterim varsa düzelt. Örn: 7.26003E+15
     # Not: Pandas float olarak okuduysa Excel'den hassasiyet kaybolmuş olabilir.
     # Bu yüzden numaranın tam metin olarak girilmesi/okunması tavsiye edilir.
@@ -1184,7 +1309,7 @@ def create_pazaryeri_pdf(s, urun_dict):
     set_ft('', 9)
     pdf.cell(0, 5, tr("  MÜŞTERİ BİLGİLERİ"), ln=1, fill=True)
     pdf.ln(1)
-    
+
     set_ft('B', 9)
     pdf.multi_cell(0, 4, tr(f"Müşteri: {s.get('Müşteri')}"))
     set_ft('', 9)
@@ -1197,7 +1322,7 @@ def create_pazaryeri_pdf(s, urun_dict):
         adres_metni = f"{adres_metni}\n{ilce.upper()} / {il.upper()}"
 
     pdf.multi_cell(0, 4, tr(f"Adres: {adres_metni}"))
-    
+
     pdf.ln(3)
 
     # Urunler
@@ -1215,7 +1340,7 @@ def create_pazaryeri_pdf(s, urun_dict):
     # Barcode
     if kargo_takip:
         pdf.ln(10)
-        
+
         # Kargo Firmasi kaldirildi, sadece Kargo Takip No yaziyoruz
         set_ft('', 9)
         pdf.cell(0, 4, tr(f"Kargo Takip No: {kargo_takip}"), ln=1, align='C')
@@ -1225,26 +1350,26 @@ def create_pazaryeri_pdf(s, urun_dict):
             import tempfile
             import os
             import requests
-            
+
             # API ile en standart ve net barkodu olusturuyoruz (yuksekligi dusuruldu)
             api_url = f"https://bwipjs-api.metafloor.com/?bcid=code128&text={kargo_takip}&scale=3&height=12&includetext=false"
             response = requests.get(api_url, timeout=5)
-            
+
             if response.status_code == 200:
                 fd, tmp_name = tempfile.mkstemp(suffix=".png")
                 os.close(fd)
-                
+
                 with open(tmp_name, 'wb') as f:
                     f.write(response.content)
-                    
+
                 barkod_w = 80
                 # Burada resmin yuksekligini de belirleyerek dikeyde uzamasini onluyoruz
                 barkod_h = 15
                 x_pos = (100 - barkod_w) / 2
-                
+
                 pdf.image(tmp_name, x=x_pos, y=pdf.get_y(), w=barkod_w, h=barkod_h)
                 pdf.set_y(pdf.get_y() + barkod_h + 5)
-                
+
                 try:
                     os.remove(tmp_name)
                 except:
@@ -1253,7 +1378,7 @@ def create_pazaryeri_pdf(s, urun_dict):
                 # FPDF'nin kendi barkoduna fallback
                 pdf.code39(kargo_takip, x=10, y=pdf.get_y(), w=1.5, h=15)
                 pdf.set_y(pdf.get_y() + 20)
-                
+
         except Exception as e:
             print("Barkod olusturulamadi:", e)
             try:
@@ -1443,7 +1568,7 @@ elif menu == "📋 Sipariş Listesi":
                 cs_orders = st.session_state.get("cs_orders_temp")
                 msg = st.session_state.get("cs_msg_temp")
                 if cs_orders is not None:
-                    yeni_siparis_satirlari = format_ciceksepeti_orders(cs_orders, df_pz if not df_pz.empty else None)
+                    yeni_siparis_satirlari = format_ciceksepeti_orders(cs_orders, df_pz if df_pz is not None and not df_pz.empty else None)
                     if not yeni_siparis_satirlari:
                         st.info("Yeni bir Çiçeksepeti siparişi bulunamadı (Hepsi zaten sistemde olabilir).")
                     else:
@@ -1471,13 +1596,13 @@ elif menu == "📋 Sipariş Listesi":
                 df_pz['Yazdırıldı Durumu'] = 'YAZDIRILMADI'
 
             df_pz = df_pz.sort_values(by="Tarih", ascending=False)
-            
+
             # Sekmeler
             tab_yeni, tab_yazdirilanlar, tab_tumu = st.tabs(["🆕 Yeni Siparişler (Yazdırılmamış)", "🖨️ Yazdırılanlar", "Tüm Kayıtlar"])
 
             with tab_yeni:
                 df_yeni = df_pz[df_pz['Yazdırıldı Durumu'] != 'YAZDIRILDI'].copy()
-                
+
                 if df_yeni.empty:
                     st.success("Tüm siparişler yazdırılmış!")
                 else:
@@ -1497,14 +1622,14 @@ elif menu == "📋 Sipariş Listesi":
                         disabled=df_yeni.columns.drop("Seç").tolist(),
                         use_container_width=True
                     )
-                    
+
                     secili_siparisler = edited_df[edited_df["Seç"] == True]
-                    
+
                     if not secili_siparisler.empty:
                         st.write(f"**{len(secili_siparisler)}** sipariş seçildi.")
-                        
+
                         col_btn1, col_btn2 = st.columns([1, 1])
-                        
+
                         # PDF olusturma butonlari (tekli veya toplu indirebilmek icin once uretmek gerekebilir, ancak Streamlit download_button datayi onceden ister)
                         # Bu yuzden formati su sekilde yapmaliyiz: once 'Toplu PDF Olustur' a basilip session'a alinir
                         if st.button("🖨️ Seçilenleri Yazdır (PDF Oluştur)", type="primary"):
@@ -1513,7 +1638,7 @@ elif menu == "📋 Sipariş Listesi":
                                 # Ensure Siparis No exists for fallback
                                 for s in sip_listesi:
                                     s['Siparis No'] = s.get('Pazaryeri Siparis No', '')
-                                    
+
                                 pdf_data = create_pazaryeri_bulk_pdf(sip_listesi, GUNCEL_URUNLER)
                                 st.session_state['bulk_pdf_data'] = pdf_data
                                 st.session_state['bulk_pdf_siparis_nolar'] = secili_siparisler['Pazaryeri Siparis No'].astype(str).tolist()
@@ -1527,7 +1652,7 @@ elif menu == "📋 Sipariş Listesi":
                                 mime="application/pdf",
                                 type="primary"
                             )
-                            
+
                             # İndir butonunun ardından durum güncelleme butonu
                             if st.button("✅ İndirdim, 'Yazdırıldı' Olarak İşaretle"):
                                 update_yazdirildi_durumu(st.session_state['bulk_pdf_siparis_nolar'])
@@ -1927,4 +2052,3 @@ elif menu == "➕ Ürün Yönetimi":
                 yeni_urun_resim_ekle(ad, dosya)
                 st.success("Eklendi!")
             else: st.warning("Eksik bilgi.")
-
