@@ -307,92 +307,6 @@ def create_efatura_payload(siparis, user_id=None, company_id=None):
 
     return payload
 
-# --- ÇİÇEKSEPETİ API BAĞLANTISI ---
-def fetch_ciceksepeti_orders(start_date_iso=None, end_date_iso=None):
-    try:
-        if "ciceksepeti" not in st.secrets:
-            return None, "st.secrets içinde [ciceksepeti] ayarı bulunamadı."
-
-        ciceksepeti_secrets = st.secrets["ciceksepeti"]
-        api_key = ciceksepeti_secrets.get("api_key")
-
-        if not api_key:
-            return None, "Çiçeksepeti API bilgileri (api_key) st.secrets içinde eksik!"
-
-        url = "https://apis.ciceksepeti.com/api/v1/Order/GetOrders"
-        headers = {
-            "x-api-key": api_key,
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "pageSize": 100,
-            "page": 0
-        }
-        
-        if start_date_iso and end_date_iso:
-            payload["startDate"] = start_date_iso
-            payload["endDate"] = end_date_iso
-            
-        response = requests.post(url, headers=headers, json=payload)
-        
-        if response.status_code == 200:
-            try:
-                res_data = response.json()
-                if isinstance(res_data, dict) and "supplierOrderListWithBranch" in res_data:
-                    return res_data.get("supplierOrderListWithBranch", []), "BAŞARILI"
-                return res_data, "BAŞARILI"
-            except:
-                return [], "BAŞARILI"
-        else:
-            return None, f"Çiçeksepeti Hatası: {response.status_code} - {response.text}"
-    except Exception as e:
-        return None, f"Sistem Hatası: {str(e)}"
-
-def ciceksepeti_efatura_gonder(order_item_id, pdf_b64=None, pdf_url=None):
-    """Çiçeksepeti faturasını API üzerinden gönderir."""
-    try:
-        if "ciceksepeti" not in st.secrets:
-            return None, "st.secrets içinde [ciceksepeti] ayarı bulunamadı."
-            
-        ciceksepeti_secrets = st.secrets["ciceksepeti"]
-        api_key = ciceksepeti_secrets.get("api_key")
-
-        if not api_key:
-            return None, "Çiçeksepeti API bilgileri (api_key) st.secrets içinde eksik!"
-
-        url = "https://apis.ciceksepeti.com/api/v1/Branch/SendInvoiceMail"
-        headers = {
-            "x-api-key": api_key,
-            "Content-Type": "application/json"
-        }
-        
-        item = {"orderItemId": int(order_item_id)}
-        if pdf_b64:
-            item["document"] = pdf_b64
-        elif pdf_url:
-            item["documentUrl"] = pdf_url
-        else:
-            return None, "Fatura dokümanı veya URL'si belirtilmedi."
-
-        payload = {
-            "items": [item]
-        }
-
-        response = requests.post(url, headers=headers, json=payload)
-        
-        if response.status_code == 200:
-            try:
-                res_data = response.json()
-            except:
-                res_data = response.text
-            return res_data, "BAŞARILI"
-        else:
-            return None, f"Çiçeksepeti Fatura Gönderim Hatası: {response.status_code} - {response.text}"
-    except Exception as e:
-        return None, f"Sistem Hatası: {str(e)}"
-
-
 # --- TRENDYOL API BAĞLANTISI ---
 def fetch_trendyol_orders(start_date_ms=None, end_date_ms=None, status=None):
     try:
@@ -522,12 +436,137 @@ def format_trendyol_orders(orders, existing_db_df):
 
     return formatted_list
 
+
+
+def fetch_ciceksepeti_orders(start_date_iso=None, end_date_iso=None):
+    try:
+        if "ciceksepeti" not in st.secrets:
+            return None, "st.secrets içinde [ciceksepeti] ayarı bulunamadı."
+
+        ciceksepeti_secrets = st.secrets["ciceksepeti"]
+        api_key = ciceksepeti_secrets.get("api_key")
+
+        if not api_key:
+            return None, "Çiçeksepeti API bilgileri (api_key) st.secrets içinde eksik!"
+
+        url = "https://apis.ciceksepeti.com/api/v1/Order/GetOrders"
+        headers = {
+            "x-api-key": api_key,
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "pageSize": 100,
+            "page": 0
+        }
+        
+        if start_date_iso and end_date_iso:
+            payload["startDate"] = start_date_iso
+            payload["endDate"] = end_date_iso
+            
+        response = requests.post(url, headers=headers, json=payload)
+        
+        if response.status_code == 200:
+            try:
+                res_data = response.json()
+                if isinstance(res_data, dict) and "supplierOrderListWithBranch" in res_data:
+                    return res_data.get("supplierOrderListWithBranch", []), "BAŞARILI"
+                return res_data, "BAŞARILI"
+            except:
+                return [], "BAŞARILI"
+        else:
+            return None, f"Çiçeksepeti Hatası: {response.status_code} - {response.text}"
+    except Exception as e:
+        return None, f"Sistem Hatası: {str(e)}"
+
+def format_ciceksepeti_orders(orders, existing_db_df):
+    """Çiçeksepeti siparişlerini sisteme uygun formata (PazaryeriSiparisleri sayfasına) dönüştürür."""
+    formatted_list = []
+
+    existing_order_notes = []
+    if existing_db_df is not None and not existing_db_df.empty and 'Pazaryeri Siparis No' in existing_db_df.columns:
+        existing_order_notes = existing_db_df['Pazaryeri Siparis No'].astype(str).tolist()
+
+    for order in orders:
+        # SendInvoiceMail endpoint explicitly requires orderItemId instead of orderId
+        cs_order_no = str(order.get('orderItemId', order.get('orderNo', order.get('orderId', ''))))
+        
+        if not cs_order_no or cs_order_no in existing_order_notes:
+            continue
+
+        receiver = order.get('receiver', {})
+        sender = order.get('sender', {})
+        musteri_adi = receiver.get('fullName', order.get('receiverName', sender.get('fullName', ''))).strip()
+        tel = receiver.get('phone', order.get('receiverPhone', ''))
+        
+        adres_str = order.get('receiverAddress', order.get('deliveryAddress', order.get('shippingAddress', '')))
+        if isinstance(adres_str, dict):
+            il = adres_str.get('city', '')
+            ilce = adres_str.get('district', '')
+            adres_str = adres_str.get('address', '')
+        else:
+            il = order.get('receiverCity', order.get('deliveryCity', ''))
+            ilce = order.get('receiverDistrict', order.get('deliveryDistrict', ''))
+            adres_str = str(adres_str)
+
+        tc = order.get('invoiceAddress', {}).get('tcIdentityNumber', order.get('taxNumber', ''))
+        mail = order.get('customerEmail', order.get('senderEmail', ''))
+
+        tarih_val = order.get('orderDate', order.get('orderCreateDate', ''))
+        tarih = simdi().strftime("%d.%m.%Y %H:%M")
+        if tarih_val:
+            if isinstance(tarih_val, (int, float)):
+                try:
+                    tarih = datetime.fromtimestamp(tarih_val/1000).strftime("%d.%m.%Y %H:%M")
+                except: pass
+            else:
+                try:
+                    from dateutil import parser
+                    tarih = parser.parse(tarih_val).strftime("%d.%m.%Y %H:%M")
+                except: pass
+
+        lines = order.get('orderItems', order.get('items', []))
+
+        u1, a1, i1 = "", 0, ""
+        u2, a2, i2 = "", 0, ""
+        toplam_tutar = order.get('totalPrice', order.get('paymentAmount', 0))
+
+        if len(lines) > 0:
+            u1 = lines[0].get('productName', lines[0].get('name', ''))
+            a1 = lines[0].get('quantity', lines[0].get('count', 0))
+        if len(lines) > 1:
+            u2 = lines[1].get('productName', lines[1].get('name', ''))
+            a2 = lines[1].get('quantity', lines[1].get('count', 0))
+        if len(lines) > 2:
+            i1 = "Çiçeksepeti panelinden kontrol ediniz (3+ ürün)"
+
+        durum = "YENİ SİPARİŞ"
+        
+        odeme = "CICEKSEPETI"
+        kaynak = "Çiçeksepeti"
+        fatura = "KESİLMEDİ"
+        tedarik = "BEKLİYOR"
+        kargo_takip = str(order.get('cargoTrackingNumber', order.get('trackingNumber', ''))).strip()
+        kargo_firmasi = str(order.get('cargoProviderName', order.get('cargoCompany', ''))).strip()
+
+        yazdirildi = "YAZDIRILMADI"
+        satir = [
+            cs_order_no, tarih, durum, musteri_adi, tel, tc, mail,
+            u1, a1, i1, u2, a2, i2, toplam_tutar, odeme, kaynak,
+            adres_str, kargo_takip, fatura, tedarik, il, ilce, kargo_firmasi, yazdirildi
+        ]
+
+        formatted_list.append(satir)
+
+    return formatted_list
+
+
 def ciceksepeti_efatura_gonder(order_item_id, pdf_b64=None, pdf_url=None):
     """Çiçeksepeti faturasını API üzerinden gönderir."""
     try:
         if "ciceksepeti" not in st.secrets:
             return None, "st.secrets içinde [ciceksepeti] ayarı bulunamadı."
-            
+
         ciceksepeti_secrets = st.secrets["ciceksepeti"]
         api_key = ciceksepeti_secrets.get("api_key")
 
@@ -539,7 +578,7 @@ def ciceksepeti_efatura_gonder(order_item_id, pdf_b64=None, pdf_url=None):
             "x-api-key": api_key,
             "Content-Type": "application/json"
         }
-        
+
         item = {"orderItemId": int(order_item_id)}
         if pdf_b64:
             item["document"] = pdf_b64
@@ -553,7 +592,7 @@ def ciceksepeti_efatura_gonder(order_item_id, pdf_b64=None, pdf_url=None):
         }
 
         response = requests.post(url, headers=headers, json=payload)
-        
+
         if response.status_code == 200:
             try:
                 res_data = response.json()
@@ -1529,7 +1568,7 @@ elif menu == "📋 Sipariş Listesi":
                 cs_orders = st.session_state.get("cs_orders_temp")
                 msg = st.session_state.get("cs_msg_temp")
                 if cs_orders is not None:
-                    yeni_siparis_satirlari = format_ciceksepeti_orders(cs_orders, df_pz if not df_pz.empty else None)
+                    yeni_siparis_satirlari = format_ciceksepeti_orders(cs_orders, df_pz if df_pz is not None and not df_pz.empty else None)
                     if not yeni_siparis_satirlari:
                         st.info("Yeni bir Çiçeksepeti siparişi bulunamadı (Hepsi zaten sistemde olabilir).")
                     else:
@@ -1678,12 +1717,12 @@ elif menu == "🧾 Fatura Takibi":
                                         st.success("Güncellendi!")
                                         st.rerun()
                                     else: st.error(sonuc)
-                                    
+
                         with col_f3:
                             with st.popover("🌺 Çiçeksepeti Fatura Yükle", use_container_width=True):
                                 st.info("Sadece Çiçeksepeti siparişleri için geçerlidir.")
                                 uploaded_pdfs = st.file_uploader("Çiçeksepeti Faturası (PDF)", type=["pdf"], accept_multiple_files=True)
-                                
+
                                 if st.button("Çiçeksepeti'ne Gönder", type="primary", use_container_width=True):
                                     if not uploaded_pdfs:
                                         st.warning("Lütfen en az 1 PDF dosyası yükleyin!")
@@ -1694,15 +1733,15 @@ elif menu == "🧾 Fatura Takibi":
                                     else:
                                         basarili_cs_nolar = []
                                         siparis_nolar = [int(s.split(" - ")[0]) for s in secilen_faturalar]
-                                        
+
                                         import base64
-                                        
+
                                         # Sort the selected siparis nolar to have a deterministic order.
                                         # Assuming users match the files alphabetically or in some predictable sequence.
                                         # Or better, we can show a mapping to the user before sending.
                                         # But for automated matching via multiselect/uploader, we assume the user uploads in the same order as selection,
                                         # or we attempt to match filename with order number.
-                                        
+
                                         for uploaded_pdf in uploaded_pdfs:
                                             filename = uploaded_pdf.name
                                             # Try to find the sip_no in the filename
@@ -1711,7 +1750,7 @@ elif menu == "🧾 Fatura Takibi":
                                                 if str(sip_no) in filename:
                                                     matched_sip_no = sip_no
                                                     break
-                                            
+
                                             # If not matched by filename, we fallback to index based matching if it's the only option,
                                             # but safer to require naming convention.
                                             if matched_sip_no is None:
@@ -1722,21 +1761,21 @@ elif menu == "🧾 Fatura Takibi":
                                                     continue
                                             else:
                                                 siparis_nolar.remove(matched_sip_no)
-                                                
+
                                             pdf_bytes = uploaded_pdf.read()
                                             cs_pdf_b64 = base64.b64encode(pdf_bytes).decode('utf-8')
-                                            
+
                                             resp, cs_msg = ciceksepeti_efatura_gonder(order_item_id=matched_sip_no, pdf_b64=cs_pdf_b64)
                                             if cs_msg == "BAŞARILI":
                                                 basarili_cs_nolar.append(matched_sip_no)
                                                 st.success(f"#{matched_sip_no} Çiçeksepeti'ne başarıyla yüklendi! (Dosya: {filename})")
                                             else:
                                                 st.error(f"#{matched_sip_no} Gönderim Hatası (Dosya: {filename}): {cs_msg}")
-                                                
+
                                         if basarili_cs_nolar:
                                             fatura_durumunu_kesildi_yap(basarili_cs_nolar)
                                             st.info("Kayıtlar güncellendi.")
-                                        
+
                         with col_f2:
                             if st.button("⚡ Trendyol E-Fatura Kes", type="primary", use_container_width=True):
                                 if secilen_faturalar:
