@@ -819,12 +819,14 @@ def yeni_urun_resim_ekle(ad, resim_adi):
     cache_temizle()
 
 # --- ÖZEL FONKSİYONLAR ---
-def fatura_durumunu_kesildi_yap(siparis_nolar):
+def fatura_durumunu_kesildi_yap(siparis_nolar, is_pazaryeri=False):
     sh = get_sheet()
-    w = sh.worksheet("Siparisler")
+    sheet_name = "PazaryeriSiparisleri" if is_pazaryeri else "Siparisler"
+    w = sh.worksheet(sheet_name)
     try:
         headers = w.row_values(1)
-        sip_no_col = headers.index("Siparis No") + 1
+        sip_col_name = "Pazaryeri Siparis No" if is_pazaryeri else "Siparis No"
+        sip_no_col = headers.index(sip_col_name) + 1
         fatura_col = headers.index("Fatura Durumu") + 1
         for sip_no in siparis_nolar:
             cell = w.find(str(sip_no), in_column=sip_no_col)
@@ -832,6 +834,7 @@ def fatura_durumunu_kesildi_yap(siparis_nolar):
         cache_temizle()
         return "BAŞARILI"
     except Exception as e: return f"HATA: {e}"
+
 
 def tedarik_durumunu_guncelle_ve_cariye_isle(siparis_bilgileri, cari_hesap, maliyet_sozlugu):
     sh = get_sheet()
@@ -1683,138 +1686,220 @@ elif menu == "📋 Sipariş Listesi":
                         s_no_pz = secilen_pz.split(" - ")[0]
                         sip_pz = df_pz[df_pz['Pazaryeri Siparis No'].astype(str) == str(s_no_pz)].iloc[0].to_dict()
                         sip_pz['Siparis No'] = sip_pz.get('Pazaryeri Siparis No', '')
+
                         pdf_data_pz = create_pazaryeri_pdf(sip_pz, GUNCEL_URUNLER)
                         st.download_button("📥 İNDİR", pdf_data_pz, f"PazaryeriSiparis_{s_no_pz}.pdf", "application/pdf", type="primary", key="dl_pz_fis")
+
+                    if st.button("⚡ Trendyol E-Fatura Kes", type="secondary", key="btn_pz_efatura"):
+                        with st.spinner("Trendyol E-Faturam API'sine bağlanılıyor..."):
+                            token, msg = trendyol_efatura_login()
+                            if token:
+                                s_no_pz = secilen_pz.split(" - ")[0]
+                                sip_pz = df_pz[df_pz['Pazaryeri Siparis No'].astype(str) == str(s_no_pz)].iloc[0].to_dict()
+                                # Prepare payload
+                                payload = create_efatura_payload(sip_pz, user_id=token.get("user_id"), company_id=token.get("company_id"))
+                                il_kontrol = sip_pz.get('İl', '')
+                                ilce_kontrol = sip_pz.get('İlçe', '')
+
+                                if not il_kontrol or not ilce_kontrol or str(il_kontrol).strip() == "" or str(ilce_kontrol).strip() == "":
+                                    st.error(f"#{s_no_pz} Hatası: İl veya İlçe bilgisi eksik!")
+                                else:
+                                    cevap, msj2 = trendyol_efatura_kes(token.get("token"), payload)
+                                    if msj2 == "BAŞARILI":
+                                        fatura_durumunu_kesildi_yap([s_no_pz], is_pazaryeri=True)
+                                        st.success(f"#{s_no_pz} numaralı sipariş için e-fatura oluşturuldu!")
+                                    else:
+                                        st.error(f"#{s_no_pz} Hatası: {msj2}")
+                            else:
+                                st.error(f"Giriş başarısız: {msg}")
+
         else:
             st.info("Pazaryeri veritabanında henüz kayıt bulunmuyor.")
+
 
 # 3. FATURA TAKİBİ
 elif menu == "🧾 Fatura Takibi":
     st.header("Müşteri Fatura Yönetimi")
     try:
-        raw_data = verileri_getir("Siparisler")
-        if raw_data:
-            df = pd.DataFrame(raw_data)
-            df['Tutar_float'] = df['Tutar'].apply(lambda x: safe_float(x))
-            if "Fatura Durumu" not in df.columns: st.error("Veritabanında 'Fatura Durumu' sütunu bulunamadı.")
-            else:
-                tab1, tab2 = st.tabs(["🔴 Kesilecekler", "🟢 Kesilenler"])
-                with tab1:
-                    bekleyenler = df[df["Fatura Durumu"] != "KESİLDİ"].copy()
-                    if not bekleyenler.empty:
-                        st.metric("Bekleyen Tutar", f"{bekleyenler['Tutar_float'].sum():,.2f} TL")
-                        st.dataframe(bekleyenler[["Siparis No", "Tarih", "Müşteri", "Tutar", "Fatura Durumu"]], use_container_width=True)
-                        secenekler = bekleyenler.apply(lambda x: f"{x['Siparis No']} - {x['Müşteri']} ({x['Tutar']})", axis=1).tolist()
-                        secilen_faturalar = st.multiselect("İşlem Yapılacak Siparişleri Seç:", secenekler)
+        tab_manuel, tab_pazaryeri = st.tabs(["✍️ Manuel Siparişler", "🌐 Pazaryeri Siparişleri"])
 
-                        col_f1, col_f2, col_f3 = st.columns(3)
-                        with col_f1:
-                            if st.button("Manuel Kesildi İşaretle", use_container_width=True):
-                                if secilen_faturalar:
-                                    siparis_nolar = [int(s.split(" - ")[0]) for s in secilen_faturalar]
-                                    sonuc = fatura_durumunu_kesildi_yap(siparis_nolar)
-                                    if sonuc == "BAŞARILI":
-                                        st.success("Güncellendi!")
-                                        st.rerun()
-                                    else: st.error(sonuc)
+        with tab_manuel:
+            raw_data = verileri_getir("Siparisler")
+            if raw_data:
+                df = pd.DataFrame(raw_data)
+                df['Tutar_float'] = df['Tutar'].apply(lambda x: safe_float(x))
+                if "Fatura Durumu" not in df.columns: st.error("Veritabanında 'Fatura Durumu' sütunu bulunamadı.")
+                else:
+                    tab1, tab2 = st.tabs(["🔴 Kesilecekler", "🟢 Kesilenler"])
+                    with tab1:
+                        bekleyenler = df[df["Fatura Durumu"] != "KESİLDİ"].copy()
+                        if not bekleyenler.empty:
+                            st.metric("Bekleyen Tutar", f"{bekleyenler['Tutar_float'].sum():,.2f} TL")
+                            st.dataframe(bekleyenler[["Siparis No", "Tarih", "Müşteri", "Tutar", "Fatura Durumu"]], use_container_width=True)
+                            secenekler = bekleyenler.apply(lambda x: f"{x['Siparis No']} - {x['Müşteri']} ({x['Tutar']})", axis=1).tolist()
+                            secilen_faturalar = st.multiselect("İşlem Yapılacak Siparişleri Seç:", secenekler)
 
-                        with col_f3:
-                            with st.popover("🌺 Çiçeksepeti Fatura Yükle", use_container_width=True):
-                                st.info("Sadece Çiçeksepeti siparişleri için geçerlidir.")
-                                uploaded_pdfs = st.file_uploader("Çiçeksepeti Faturası (PDF)", type=["pdf"], accept_multiple_files=True)
-
-                                if st.button("Çiçeksepeti'ne Gönder", type="primary", use_container_width=True):
-                                    if not uploaded_pdfs:
-                                        st.warning("Lütfen en az 1 PDF dosyası yükleyin!")
-                                    elif not secilen_faturalar:
-                                        st.warning("Lütfen işlem yapılacak siparişi seçin!")
-                                    elif len(uploaded_pdfs) != len(secilen_faturalar):
-                                        st.warning("Seçilen sipariş sayısı ile yüklenen PDF sayısı eşleşmiyor!")
-                                    else:
-                                        basarili_cs_nolar = []
+                            col_f1, col_f2 = st.columns(2)
+                            with col_f1:
+                                if st.button("Manuel Kesildi İşaretle", use_container_width=True):
+                                    if secilen_faturalar:
                                         siparis_nolar = [int(s.split(" - ")[0]) for s in secilen_faturalar]
+                                        sonuc = fatura_durumunu_kesildi_yap(siparis_nolar)
+                                        if sonuc == "BAŞARILI":
+                                            st.success("Güncellendi!")
+                                            st.rerun()
+                                        else: st.error(sonuc)
 
-                                        import base64
+                            with col_f2:
+                                if st.button("⚡ Trendyol E-Fatura Kes", type="primary", use_container_width=True):
+                                    if secilen_faturalar:
+                                        with st.spinner("Trendyol E-Faturam API'sine bağlanılıyor..."):
+                                            token, msg = trendyol_efatura_login()
+                                            if token:
+                                                basarili_nolar = []
+                                                siparis_nolar = [int(s.split(" - ")[0]) for s in secilen_faturalar]
+                                                for sip_no in siparis_nolar:
+                                                    siparis_satiri = bekleyenler[bekleyenler['Siparis No'].astype(str) == str(sip_no)].iloc[0].to_dict()
+                                                    payload = create_efatura_payload(siparis_satiri, user_id=token.get("user_id"), company_id=token.get("company_id"))
 
-                                        # Sort the selected siparis nolar to have a deterministic order.
-                                        # Assuming users match the files alphabetically or in some predictable sequence.
-                                        # Or better, we can show a mapping to the user before sending.
-                                        # But for automated matching via multiselect/uploader, we assume the user uploads in the same order as selection,
-                                        # or we attempt to match filename with order number.
+                                                    il_kontrol = siparis_satiri.get('İl', '')
+                                                    ilce_kontrol = siparis_satiri.get('İlçe', '')
 
-                                        for uploaded_pdf in uploaded_pdfs:
-                                            filename = uploaded_pdf.name
-                                            # Try to find the sip_no in the filename
-                                            matched_sip_no = None
-                                            for sip_no in siparis_nolar:
-                                                if str(sip_no) in filename:
-                                                    matched_sip_no = sip_no
-                                                    break
+                                                    if not il_kontrol or not ilce_kontrol or str(il_kontrol).strip() == "" or str(ilce_kontrol).strip() == "":
+                                                        st.error(f"#{sip_no} Hatası: İl veya İlçe bilgisi eksik! Lütfen siparişi güncelleyip (veya excelden ekleyip) tekrar deneyin.")
+                                                        continue
 
-                                            # If not matched by filename, we fallback to index based matching if it's the only option,
-                                            # but safer to require naming convention.
-                                            if matched_sip_no is None:
-                                                # Just use the first available from the list that hasn't been used yet for simplicity in this fallback
-                                                if len(siparis_nolar) > 0:
-                                                    matched_sip_no = siparis_nolar.pop(0)
-                                                else:
-                                                    continue
+                                                    cevap, msj2 = trendyol_efatura_kes(token.get("token"), payload)
+                                                    if msj2 == "BAŞARILI":
+                                                        basarili_nolar.append(sip_no)
+                                                        st.success(f"#{sip_no} numaralı sipariş için e-fatura oluşturuldu!")
+                                                    else:
+                                                        st.error(f"#{sip_no} Hatası: {msj2}")
+
+                                                if basarili_nolar:
+                                                    fatura_durumunu_kesildi_yap(basarili_nolar)
+                                                    st.info("Kayıtlar güncellendi.")
                                             else:
-                                                siparis_nolar.remove(matched_sip_no)
+                                                st.error(msg)
+                        else: st.success("Kesilecek fatura kalmadı.")
+                    with tab2:
+                        kesilenler = df[df["Fatura Durumu"] == "KESİLDİ"]
+                        st.dataframe(kesilenler[["Siparis No", "Tarih", "Müşteri", "Tutar", "Fatura Durumu"]], use_container_width=True)
+            else:
+                st.info("Siparisler veritabanında henüz kayıt bulunmuyor.")
 
-                                            pdf_bytes = uploaded_pdf.read()
-                                            cs_pdf_b64 = base64.b64encode(pdf_bytes).decode('utf-8')
+        with tab_pazaryeri:
+            pz_data = verileri_getir("PazaryeriSiparisleri")
+            if pz_data:
+                df_pz = pd.DataFrame(pz_data)
+                df_pz['Tutar_float'] = df_pz['Tutar'].apply(lambda x: safe_float(x))
+                if "Fatura Durumu" not in df_pz.columns: st.error("Veritabanında 'Fatura Durumu' sütunu bulunamadı.")
+                else:
+                    tab1_pz, tab2_pz = st.tabs(["🔴 Kesilecekler (Pazaryeri)", "🟢 Kesilenler (Pazaryeri)"])
+                    with tab1_pz:
+                        bekleyenler_pz = df_pz[df_pz["Fatura Durumu"] != "KESİLDİ"].copy()
+                        if not bekleyenler_pz.empty:
+                            st.metric("Bekleyen Pazaryeri Tutar", f"{bekleyenler_pz['Tutar_float'].sum():,.2f} TL")
+                            st.dataframe(bekleyenler_pz[["Pazaryeri Siparis No", "Tarih", "Müşteri", "Tutar", "Fatura Durumu", "Kaynak"]], use_container_width=True)
+                            secenekler_pz = bekleyenler_pz.apply(lambda x: f"{x['Pazaryeri Siparis No']} - {x['Müşteri']} ({x['Tutar']})", axis=1).tolist()
+                            secilen_faturalar_pz = st.multiselect("İşlem Yapılacak Pazaryeri Siparişlerini Seç:", secenekler_pz, key="ms_pz_faturalar")
 
-                                            resp, cs_msg = ciceksepeti_efatura_gonder(order_item_id=matched_sip_no, pdf_b64=cs_pdf_b64)
-                                            if cs_msg == "BAŞARILI":
-                                                basarili_cs_nolar.append(matched_sip_no)
-                                                st.success(f"#{matched_sip_no} Çiçeksepeti'ne başarıyla yüklendi! (Dosya: {filename})")
-                                            else:
-                                                st.error(f"#{matched_sip_no} Gönderim Hatası (Dosya: {filename}): {cs_msg}")
+                            col_f1_pz, col_f2_pz, col_f3_pz = st.columns(3)
+                            with col_f1_pz:
+                                if st.button("Manuel Kesildi İşaretle (Pazaryeri)", use_container_width=True, key="btn_pz_manuel"):
+                                    if secilen_faturalar_pz:
+                                        siparis_nolar_pz = [str(s.split(" - ")[0]) for s in secilen_faturalar_pz]
+                                        sonuc_pz = fatura_durumunu_kesildi_yap(siparis_nolar_pz, is_pazaryeri=True)
+                                        if sonuc_pz == "BAŞARILI":
+                                            st.success("Güncellendi!")
+                                            st.rerun()
+                                        else: st.error(sonuc_pz)
 
-                                        if basarili_cs_nolar:
-                                            fatura_durumunu_kesildi_yap(basarili_cs_nolar)
-                                            st.info("Kayıtlar güncellendi.")
+                            with col_f3_pz:
+                                with st.popover("🌺 Çiçeksepeti Fatura Yükle", use_container_width=True):
+                                    st.info("Sadece Çiçeksepeti siparişleri için geçerlidir.")
+                                    uploaded_pdfs = st.file_uploader("Çiçeksepeti Faturası (PDF)", type=["pdf"], accept_multiple_files=True)
 
-                        with col_f2:
-                            if st.button("⚡ Trendyol E-Fatura Kes", type="primary", use_container_width=True):
-                                if secilen_faturalar:
-                                    with st.spinner("Trendyol E-Faturam API'sine bağlanılıyor..."):
-                                        token, msg = trendyol_efatura_login()
-                                        if token:
-                                            basarili_nolar = []
-                                            siparis_nolar = [int(s.split(" - ")[0]) for s in secilen_faturalar]
-                                            for sip_no in siparis_nolar:
-                                                siparis_satiri = bekleyenler[bekleyenler['Siparis No'].astype(str) == str(sip_no)].iloc[0].to_dict()
-                                                # token artık bir dict dönüyor: {"token": "...", "user_id": "...", "company_id": "..."}
-                                                payload = create_efatura_payload(siparis_satiri, user_id=token.get("user_id"), company_id=token.get("company_id"))
-
-                                                il_kontrol = siparis_satiri.get('İl', '')
-                                                ilce_kontrol = siparis_satiri.get('İlçe', '')
-
-                                                if not il_kontrol or not ilce_kontrol or str(il_kontrol).strip() == "" or str(ilce_kontrol).strip() == "":
-                                                    st.error(f"#{sip_no} Hatası: İl veya İlçe bilgisi eksik! Lütfen siparişi güncelleyip (veya excelden ekleyip) tekrar deneyin.")
-                                                    continue
-
-                                                cevap, msj2 = trendyol_efatura_kes(token.get("token"), payload)
-                                                if msj2 == "BAŞARILI":
-                                                    basarili_nolar.append(sip_no)
-                                                    st.success(f"#{sip_no} numaralı sipariş için e-fatura oluşturuldu!")
-                                                else:
-                                                    st.error(f"#{sip_no} Hatası: {msj2}")
-
-                                            # Başarılı olanların durumunu "KESİLDİ" yap
-                                            if basarili_nolar:
-                                                fatura_durumunu_kesildi_yap(basarili_nolar)
-                                                st.info("Kayıtlar güncellendi.")
+                                    if st.button("Çiçeksepeti'ne Gönder", type="primary", use_container_width=True, key="btn_pz_cs"):
+                                        if not uploaded_pdfs:
+                                            st.warning("Lütfen en az 1 PDF dosyası yükleyin!")
+                                        elif not secilen_faturalar_pz:
+                                            st.warning("Lütfen işlem yapılacak siparişi seçin!")
+                                        elif len(uploaded_pdfs) != len(secilen_faturalar_pz):
+                                            st.warning("Seçilen sipariş sayısı ile yüklenen PDF sayısı eşleşmiyor!")
                                         else:
-                                            st.error(msg)
-                    else: st.success("Kesilecek fatura kalmadı.")
-                with tab2:
-                    kesilenler = df[df["Fatura Durumu"] == "KESİLDİ"]
-                    st.dataframe(kesilenler[["Siparis No", "Tarih", "Müşteri", "Tutar", "Fatura Durumu"]], use_container_width=True)
-    except Exception as e: st.error(f"Hata: {e}")
+                                            basarili_cs_nolar = []
+                                            # Using str because pazaryeri siparis no can be string
+                                            siparis_nolar_pz = [str(s.split(" - ")[0]) for s in secilen_faturalar_pz]
 
+                                            import base64
+                                            for uploaded_pdf in uploaded_pdfs:
+                                                filename = uploaded_pdf.name
+                                                matched_sip_no = None
+                                                for sip_no in siparis_nolar_pz:
+                                                    if str(sip_no) in filename:
+                                                        matched_sip_no = sip_no
+                                                        break
+
+                                                if matched_sip_no is None:
+                                                    st.warning(f"{filename} isimli dosyada seçili sipariş numaralarından biri bulunamadı. Lütfen fatura adının içine sipariş numarasını ekleyin. İşlem atlanıyor.")
+                                                    continue
+                                                else:
+                                                    siparis_nolar_pz.remove(matched_sip_no)
+
+                                                pdf_bytes = uploaded_pdf.read()
+                                                cs_pdf_b64 = base64.b64encode(pdf_bytes).decode('utf-8')
+
+                                                resp, cs_msg = ciceksepeti_efatura_gonder(order_item_id=matched_sip_no, pdf_b64=cs_pdf_b64)
+                                                if cs_msg == "BAŞARILI":
+                                                    basarili_cs_nolar.append(matched_sip_no)
+                                                    st.success(f"#{matched_sip_no} Çiçeksepeti'ne başarıyla yüklendi! (Dosya: {filename})")
+                                                else:
+                                                    st.error(f"#{matched_sip_no} Gönderim Hatası (Dosya: {filename}): {cs_msg}")
+
+                                            if basarili_cs_nolar:
+                                                fatura_durumunu_kesildi_yap(basarili_cs_nolar, is_pazaryeri=True)
+                                                st.info("Kayıtlar güncellendi.")
+
+                            with col_f2_pz:
+                                if st.button("⚡ Trendyol E-Fatura Kes", type="primary", use_container_width=True, key="btn_pz_ty"):
+                                    if secilen_faturalar_pz:
+                                        with st.spinner("Trendyol E-Faturam API'sine bağlanılıyor..."):
+                                            token, msg = trendyol_efatura_login()
+                                            if token:
+                                                basarili_nolar_pz = []
+                                                siparis_nolar_pz = [str(s.split(" - ")[0]) for s in secilen_faturalar_pz]
+                                                for sip_no in siparis_nolar_pz:
+                                                    siparis_satiri = bekleyenler_pz[bekleyenler_pz['Pazaryeri Siparis No'].astype(str) == str(sip_no)].iloc[0].to_dict()
+                                                    payload = create_efatura_payload(siparis_satiri, user_id=token.get("user_id"), company_id=token.get("company_id"))
+
+                                                    il_kontrol = siparis_satiri.get('İl', '')
+                                                    ilce_kontrol = siparis_satiri.get('İlçe', '')
+
+                                                    if not il_kontrol or not ilce_kontrol or str(il_kontrol).strip() == "" or str(ilce_kontrol).strip() == "":
+                                                        st.error(f"#{sip_no} Hatası: İl veya İlçe bilgisi eksik! Lütfen siparişi güncelleyip tekrar deneyin.")
+                                                        continue
+
+                                                    cevap, msj2 = trendyol_efatura_kes(token.get("token"), payload)
+                                                    if msj2 == "BAŞARILI":
+                                                        basarili_nolar_pz.append(sip_no)
+                                                        st.success(f"#{sip_no} numaralı sipariş için e-fatura oluşturuldu!")
+                                                    else:
+                                                        st.error(f"#{sip_no} Hatası: {msj2}")
+
+                                                if basarili_nolar_pz:
+                                                    fatura_durumunu_kesildi_yap(basarili_nolar_pz, is_pazaryeri=True)
+                                                    st.info("Kayıtlar güncellendi.")
+                                            else:
+                                                st.error(msg)
+                        else: st.success("Kesilecek pazaryeri faturası kalmadı.")
+                    with tab2_pz:
+                        kesilenler_pz = df_pz[df_pz["Fatura Durumu"] == "KESİLDİ"]
+                        st.dataframe(kesilenler_pz[["Pazaryeri Siparis No", "Tarih", "Müşteri", "Tutar", "Fatura Durumu", "Kaynak"]], use_container_width=True)
+            else:
+                st.info("Pazaryeri veritabanında henüz kayıt bulunmuyor.")
+
+# 4. ALIŞ VE TEDARİK
 # 4. ALIŞ VE TEDARİK
 elif menu == "🧾 Alış ve Tedarik":
     st.header("Tedarikçi Alış Yönetimi")
