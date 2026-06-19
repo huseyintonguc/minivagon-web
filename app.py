@@ -525,20 +525,17 @@ def format_ciceksepeti_orders(orders, existing_db_df):
                     tarih = parser.parse(tarih_val).strftime("%d.%m.%Y %H:%M")
                 except: pass
 
-        lines = order.get('orderItems', order.get('items', []))
+        u1 = order.get('name', order.get('productName', ''))
+        a1 = order.get('quantity', order.get('count', 1))
+        
+        # Kişiselleştirme metinleri
+        text_list = order.get('orderItemTextListModel', [])
+        i1 = ""
+        if text_list and isinstance(text_list, list):
+            i1 = " | ".join([str(t.get('text', '')) for t in text_list if t.get('text')])
 
-        u1, a1, i1 = "", 0, ""
         u2, a2, i2 = "", 0, ""
         toplam_tutar = order.get('totalPrice', order.get('paymentAmount', 0))
-
-        if len(lines) > 0:
-            u1 = lines[0].get('productName', lines[0].get('name', ''))
-            a1 = lines[0].get('quantity', lines[0].get('count', 0))
-        if len(lines) > 1:
-            u2 = lines[1].get('productName', lines[1].get('name', ''))
-            a2 = lines[1].get('quantity', lines[1].get('count', 0))
-        if len(lines) > 2:
-            i1 = "Çiçeksepeti panelinden kontrol ediniz (3+ ürün)"
 
         durum = "YENİ SİPARİŞ"
         
@@ -1898,6 +1895,7 @@ elif menu == "🧾 Fatura Takibi":
                         st.dataframe(kesilenler_pz[["Pazaryeri Siparis No", "Tarih", "Müşteri", "Tutar", "Fatura Durumu", "Kaynak"]], use_container_width=True)
             else:
                 st.info("Pazaryeri veritabanında henüz kayıt bulunmuyor.")
+    except Exception as e: st.error(f"Hata: {e}")
 
 # 4. ALIŞ VE TEDARİK
 # 4. ALIŞ VE TEDARİK
