@@ -499,16 +499,25 @@ def format_ciceksepeti_orders(orders, existing_db_df):
         musteri_adi = receiver.get('fullName', order.get('receiverName', sender.get('fullName', ''))).strip()
         tel = receiver.get('phone', order.get('receiverPhone', ''))
         
+
         adres_str = order.get('receiverAddress', order.get('deliveryAddress', order.get('shippingAddress', '')))
+        
+        il = ""
+        ilce = ""
+        
         if isinstance(adres_str, dict):
             il = adres_str.get('city', '')
             ilce = adres_str.get('district', '')
             adres_str = adres_str.get('address', '')
-        else:
+        
+        if not il:
             il = order.get('receiverCity', order.get('deliveryCity', ''))
-            ilce = order.get('receiverDistrict', order.get('deliveryDistrict', ''))
-            adres_str = str(adres_str)
+        if not ilce:
+            ilce = order.get('receiverDistrict', order.get('receiverRegion', order.get('deliveryDistrict', '')))
 
+        if isinstance(adres_str, dict):
+            adres_str = str(adres_str)
+        
         tc = order.get('invoiceAddress', {}).get('tcIdentityNumber', order.get('taxNumber', ''))
         mail = order.get('customerEmail', order.get('senderEmail', ''))
 
@@ -526,7 +535,18 @@ def format_ciceksepeti_orders(orders, existing_db_df):
                 except: pass
 
         u1 = order.get('name', order.get('productName', ''))
-        a1 = order.get('quantity', order.get('count', 1))
+        a1 = order.get('quantity', order.get('count', 0))
+        
+        # Eğer count/quantity ana objede yoksa, muhtemelen lines/items/orderItems dizisindedir!
+        lines = order.get('orderItems', order.get('items', order.get('lines', [])))
+        if not u1 and len(lines) > 0:
+            u1 = lines[0].get('productName', lines[0].get('name', ''))
+            a1 = lines[0].get('quantity', lines[0].get('count', 0))
+            
+        # Hala 0 ise varsayilan 1 diyelim
+        if not a1 or a1 == 0:
+            a1 = 1
+
         
         # Kişiselleştirme metinleri
         text_list = order.get('orderItemTextListModel', [])
