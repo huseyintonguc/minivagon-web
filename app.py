@@ -500,14 +500,14 @@ def format_ciceksepeti_orders(orders, existing_db_df):
         tel = receiver.get('phone', order.get('receiverPhone', ''))
 
 
-        adres_str = order.get('receiverAddress', order.get('deliveryAddress', order.get('shippingAddress', '')))
+        adres_str = order.get('receiverAddress', order.get('deliveryAddress', order.get('shippingAddress', receiver.get('address', ''))))
 
-        il = ""
-        ilce = ""
+        il = receiver.get('city', '')
+        ilce = receiver.get('district', receiver.get('region', ''))
 
         if isinstance(adres_str, dict):
-            il = adres_str.get('city', '')
-            ilce = adres_str.get('district', '')
+            if not il: il = adres_str.get('city', '')
+            if not ilce: ilce = adres_str.get('district', '')
             adres_str = adres_str.get('address', '')
 
         if not il:
@@ -534,6 +534,7 @@ def format_ciceksepeti_orders(orders, existing_db_df):
                     tarih = parser.parse(tarih_val).strftime("%d.%m.%Y %H:%M")
                 except: pass
 
+
         u1 = order.get('name', order.get('productName', ''))
         a1 = order.get('quantity', order.get('count', 0))
 
@@ -544,8 +545,9 @@ def format_ciceksepeti_orders(orders, existing_db_df):
             a1 = lines[0].get('quantity', lines[0].get('count', 0))
 
         # Hala 0 ise varsayilan 1 diyelim
-        if not a1 or a1 == 0:
+        if not a1 or str(a1) == "0":
             a1 = 1
+
 
 
         # Kişiselleştirme metinleri
