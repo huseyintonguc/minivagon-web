@@ -1260,53 +1260,46 @@ def create_pazaryeri_bulk_pdf(siparisler, urun_dict):
 def create_pazaryeri_pdf(s, urun_dict):
     pdf = FPDF(format=(100, 130))
     pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=5)
+    pdf.set_auto_page_break(auto=True, margin=2) # Alt marj daraltıldı
     
     try:
         pdf.add_font('ArialTR', '', 'arial.ttf', uni=True)
         pdf.add_font('ArialTR', 'B', 'arial.ttf', uni=True)
         pdf.add_font('ArialTR', 'I', 'arial.ttf', uni=True)
-        pdf.set_font('ArialTR', '', 10)
+        pdf.set_font('ArialTR', '', 9) # Genel font 9'a düşürüldü
     except Exception as e:
         print("Font yuklenemedi:", e)
-        pdf.set_font("Arial", size=10)
+        pdf.set_font("Arial", size=9)
 
     def tr(t):
         if not t: return ""
         if 'arialtr' in pdf.fonts: return str(t)
         return str(t).replace("ğ","g").replace("Ğ","G").replace("ş","s").replace("Ş","S").replace("İ","I").replace("ı","i").encode('latin-1','replace').decode('latin-1')
 
-    def set_ft(style='', size=10):
+    def set_ft(style='', size=9):
         if 'arialtr' in pdf.fonts: pdf.set_font('ArialTR', style, size)
         else: pdf.set_font('Arial', style, size)
 
-    # Header
+    # --- Header (Küçültüldü) ---
     pdf.set_fill_color(40, 40, 40)
-    pdf.rect(0, 0, 100, 15, 'F')
+    pdf.rect(0, 0, 100, 12, 'F') # Yükseklik 15'ten 12'ye düşürüldü
     pdf.set_text_color(255, 255, 255)
-    set_ft('B', 12)
-    pdf.text(5, 10, "AHSAP HOBI DUNYASI - PAZARYERI KART")
+    set_ft('B', 10) # Başlık 12'den 10'a düşürüldü
+    pdf.text(5, 8, "AHSAP HOBI DUNYASI - PAZARYERI KART")
     
-    pdf.set_font_size(8)
+    pdf.set_font_size(7)
     pdf.set_text_color(200, 200, 200)
-    pdf.text(60, 10, f"Tarih: {s.get('Tarih')}")
+    pdf.text(65, 8, f"Tarih: {s.get('Tarih')}")
     pdf.set_text_color(0, 0, 0)
     
     kargo_takip = str(s.get('Kargo Takip No', '')).strip()
     
-    # Bilimsel gösterim varsa düzelt. Örn: 7.26003E+15
-    # Not: Pandas float olarak okuduysa Excel'den hassasiyet kaybolmuş olabilir.
-    # Bu yüzden numaranın tam metin olarak girilmesi/okunması tavsiye edilir.
     if 'E' in kargo_takip.upper():
         try:
-            # Sadece E'li formatı sayıya çevirmeyi dener.
-            # Ancak çok haneli sayılarda son rakamlar sıfır olabilir (7260030000000000 gibi).
-            # Excel'den metin olarak çekmek en doğrusudur.
             val = float(kargo_takip.upper().replace(',', '.'))
             kargo_takip = f"{val:.0f}"
         except:
             pass
-    # Virgül veya nokta ile girilmiş format bozuklukları varsa temizle (kargo takip numarasında harf ve rakam olur)
     kargo_takip = ''.join(c for c in kargo_takip if c.isalnum())
 
     kargo_firmasi = str(s.get('Kargo Firması', 'TRENDYOL EXPRESS')).strip()
@@ -1320,61 +1313,56 @@ def create_pazaryeri_pdf(s, urun_dict):
         except:
             pass
 
-    pdf.set_y(18)
-    set_ft('B', 10)
-    pdf.cell(0, 5, tr("Sipariş No: " + pazaryeri_sip_no), ln=1)
-
-    pdf.ln(2)
-
-    # Musteri
-    pdf.set_fill_color(240, 240, 240)
-    set_ft('', 9)
-    pdf.cell(0, 5, tr("  MÜŞTERİ BİLGİLERİ"), ln=1, fill=True)
-    pdf.ln(1)
-    
+    pdf.set_y(13) # Y ekseni yukarı çekildi
     set_ft('B', 9)
-    pdf.multi_cell(0, 4, tr(f"Müşteri: {s.get('Müşteri')}"))
-    set_ft('', 9)
-    pdf.multi_cell(0, 4, tr(f"Telefon: {s.get('Telefon')}"))
+    pdf.cell(0, 4, tr("Sipariş No: " + pazaryeri_sip_no), ln=1)
+
+    pdf.ln(1) # Satır arası azaltıldı
+
+    # --- Musteri (Sıkıştırıldı) ---
+    pdf.set_fill_color(240, 240, 240)
+    set_ft('', 8)
+    pdf.cell(0, 4, tr("  MÜŞTERİ BİLGİLERİ"), ln=1, fill=True)
+    
+    set_ft('B', 8)
+    pdf.multi_cell(0, 3, tr(f"Müşteri: {s.get('Müşteri')}"))
+    set_ft('', 8)
+    pdf.multi_cell(0, 3, tr(f"Telefon: {s.get('Telefon')}"))
 
     il = str(s.get('İl', '')).strip()
     ilce = str(s.get('İlçe', '')).strip()
     adres_metni = str(s.get('Adres', '')).strip()
     if il and ilce:
-        adres_metni = f"{adres_metni}\n{ilce.upper()} / {il.upper()}"
+        adres_metni = f"{adres_metni}  {ilce.upper()} / {il.upper()}" # Alt satır yerine yanına eklendi
 
-    pdf.multi_cell(0, 4, tr(f"Adres: {adres_metni}"))
+    pdf.multi_cell(0, 3, tr(f"Adres: {adres_metni}"))
     
-    pdf.ln(3)
-
-    # Urunler
-    pdf.set_fill_color(240, 240, 240)
-    set_ft('', 9)
-    pdf.cell(0, 5, tr("  ÜRÜN DETAYLARI"), ln=1, fill=True)
     pdf.ln(1)
 
-    set_ft('B', 9)
-    pdf.multi_cell(0, 4, tr(f"1) {s.get('Ürün 1')} ({s.get('Adet 1')} Adet)"))
-    if s.get('Ürün 2'):
-        pdf.ln(1)
-        pdf.multi_cell(0, 4, tr(f"2) {s.get('Ürün 2')} ({s.get('Adet 2')} Adet)"))
+    # --- Urunler ---
+    pdf.set_fill_color(240, 240, 240)
+    set_ft('', 8)
+    pdf.cell(0, 4, tr("  ÜRÜN DETAYLARI"), ln=1, fill=True)
 
-    # Barcode
+    set_ft('B', 8)
+    pdf.multi_cell(0, 3, tr(f"1) {s.get('Ürün 1')} ({s.get('Adet 1')} Adet)"))
+    if s.get('Ürün 2'):
+        pdf.multi_cell(0, 3, tr(f"2) {s.get('Ürün 2')} ({s.get('Adet 2')} Adet)"))
+
+    # --- Barcode (Boyutlar Küçültüldü) ---
     if kargo_takip:
-        pdf.ln(10)
-        
-        # Kargo Firmasi kaldirildi, sadece Kargo Takip No yaziyoruz
-        set_ft('', 9)
-        pdf.cell(0, 4, tr(f"Kargo Takip No: {kargo_takip}"), ln=1, align='C')
         pdf.ln(2)
+        set_ft('', 8)
+        pdf.cell(0, 3, tr(f"Kargo Takip No: {kargo_takip}"), ln=1, align='C')
+        pdf.ln(1)
 
         try:
             import tempfile
             import os
             import requests
             
-            # API ile en standart ve net barkodu olusturuyoruz (yuksekligi dusuruldu)
-            api_url = f"https://bwipjs-api.metafloor.com/?bcid=code128&text={kargo_takip}&scale=3&height=12&includetext=false"
+            # API'den gelen barkod yüksekliği düşürüldü
+            api_url = f"https://bwipjs-api.metafloor.com/?bcid=code128&text={kargo_takip}&scale=3&height=8&includetext=false"
             response = requests.get(api_url, timeout=5)
             
             if response.status_code == 200:
@@ -1384,28 +1372,27 @@ def create_pazaryeri_pdf(s, urun_dict):
                 with open(tmp_name, 'wb') as f:
                     f.write(response.content)
                     
-                barkod_w = 80
-                # Burada resmin yuksekligini de belirleyerek dikeyde uzamasini onluyoruz
-                barkod_h = 15
+                barkod_w = 70 # 80'den 70'e düşürüldü
+                barkod_h = 10 # 15'ten 10'a düşürüldü
                 x_pos = (100 - barkod_w) / 2
                 
                 pdf.image(tmp_name, x=x_pos, y=pdf.get_y(), w=barkod_w, h=barkod_h)
-                pdf.set_y(pdf.get_y() + barkod_h + 5)
+                pdf.set_y(pdf.get_y() + barkod_h + 2)
                 
                 try:
                     os.remove(tmp_name)
                 except:
                     pass
             else:
-                # FPDF'nin kendi barkoduna fallback
-                pdf.code39(kargo_takip, x=10, y=pdf.get_y(), w=1.5, h=15)
-                pdf.set_y(pdf.get_y() + 20)
+                # FPDF fallback
+                pdf.code39(kargo_takip, x=15, y=pdf.get_y(), w=1.2, h=10) # 1.5'tan 1.2'ye, h=15'ten 10'a düşürüldü
+                pdf.set_y(pdf.get_y() + 12)
                 
         except Exception as e:
             print("Barkod olusturulamadi:", e)
             try:
-                pdf.code39(kargo_takip, x=10, y=pdf.get_y(), w=1.5, h=15)
-                pdf.set_y(pdf.get_y() + 20)
+                pdf.code39(kargo_takip, x=15, y=pdf.get_y(), w=1.2, h=10)
+                pdf.set_y(pdf.get_y() + 12)
             except:
                 pass
 
