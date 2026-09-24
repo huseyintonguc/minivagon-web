@@ -980,32 +980,38 @@ def get_maliyet_dict():
 def create_pdf(s, urun_dict):
     pdf = FPDF(format=(100, 130))
     pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=5)
+    pdf.set_auto_page_break(auto=True, margin=2)
     
-    # Arial fontunun kalın, italik versiyonlarını da eklememiz gerekiyor (bold, italic için)
-    # Eğer font dosyaları yoksa fpdf hata vermez ama set_font('ArialTR', 'B') çalışmaz
-    # Bu yüzden sadece normal metin için ArialTR kullanıp, diğerleri için fpdf standart fontlarını kullanabilir veya hepsini ArialTR (normal) yapabiliriz
     try:
         pdf.add_font('ArialTR', '', 'arial.ttf', uni=True)
         pdf.add_font('ArialTR', 'B', 'arial.ttf', uni=True)
         pdf.add_font('ArialTR', 'I', 'arial.ttf', uni=True)
-        pdf.set_font('ArialTR', '', 10)
     except Exception as e:
         print("Font yuklenemedi:", e)
-        pdf.set_font("Arial", size=10)
 
+    def tr(t):
+        if not t: return ""
+        if 'arialtr' in pdf.fonts: return str(t)
+        return str(t).replace("ğ","g").replace("Ğ","G").replace("ş","s").replace("Ş","S").replace("İ","I").replace("ı","i").encode('latin-1','replace').decode('latin-1')
+
+    def set_ft(style='', size=8):
+        if 'arialtr' in pdf.fonts: pdf.set_font('ArialTR', style, size)
+        else: pdf.set_font('Arial', style, size)
+
+    # --- ÜST BAŞLIK ---
     pdf.set_fill_color(40, 40, 40)
-    pdf.rect(0, 0, 100, 20, 'F')
+    pdf.rect(0, 0, 100, 14, 'F')
     
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font_size(14)
-    pdf.text(5, 13, "AHSAP HOBI DUNYASI")
+    set_ft('B', 11)
+    pdf.text(3, 8, "AHSAP HOBI DUNYASI")
     
-    pdf.set_font_size(8)
+    set_ft('', 7)
     pdf.set_text_color(200, 200, 200)
-    pdf.text(55, 8, f"Siparis No: #{s.get('Siparis No')}")
-    pdf.text(55, 14, f"Tarih: {s.get('Tarih')}")
+    pdf.text(60, 6, f"Siparis No: #{s.get('Siparis No')}")
+    pdf.text(60, 11, f"Tarih: {s.get('Tarih')}")
     
+    # --- RESİMLER (Küçültüldü ve hizalandı) ---
     def resim_koy(u_adi, x_pos):
         if u_adi in urun_dict:
             dosya_adi = urun_dict[u_adi]
@@ -1014,246 +1020,106 @@ def create_pdf(s, urun_dict):
                 try:
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
                         img = Image.open(full_path).convert('RGB')
-                        img.thumbnail((300, 220))
+                        img.thumbnail((200, 200)) # Thumbnail boyutu düşürüldü
                         img.save(tmp.name)
-                        pdf.image(tmp.name, x=x_pos, y=22, w=40)
+                        # Genişlik 40'tan 28'e düşürüldü, Y ekseninde daha yukarı alındı
+                        pdf.image(tmp.name, x=x_pos, y=16, w=28) 
                 except Exception as e:
                     print("Resim hatasi:", e)
 
     if s.get('Ürün 2'): 
-        resim_koy(s.get('Ürün 1'), 5)
+        resim_koy(s.get('Ürün 1'), 15)
         resim_koy(s.get('Ürün 2'), 55)
     else: 
-        resim_koy(s.get('Ürün 1'), 30)
+        resim_koy(s.get('Ürün 1'), 36)
 
-    pdf.set_y(65)
+    # Resimlerin bittiği yerin hemen altından metne başla (eski kodda bu 65'ti ve üst üste biniyordu)
+    pdf.set_y(46) 
     pdf.set_text_color(0, 0, 0)
-    pdf.set_font_size(10)
 
-    # Eğer font yüklenmişse (fpdf anahtarları küçük harfle tutar) fpdf utf-8 destekler, çeviriye gerek kalmaz.
-    # Eğer yüklenememişse (fallback Arial) türkçe karakterleri düzeltmemiz gerekir ki pdf çökmesin.
-    def tr(t):
-        if not t: return ""
-        if 'arialtr' in pdf.fonts: return str(t)
-        return str(t).replace("ğ","g").replace("Ğ","G").replace("ş","s").replace("Ş","S").replace("İ","I").replace("ı","i").encode('latin-1','replace').decode('latin-1')
-
-    def set_ft(style='', size=10):
-        if 'arialtr' in pdf.fonts: pdf.set_font('ArialTR', style, size)
-        else: pdf.set_font('Arial', style, size)
-
+    # --- ÜRÜN DETAYLARI ---
     pdf.set_fill_color(240, 240, 240)
-    pdf.cell(0, 6, tr("  ÜRÜN DETAYLARI"), ln=1, fill=True)
+    set_ft('B', 8)
+    pdf.cell(0, 4, tr("  ÜRÜN DETAYLARI"), ln=1, fill=True)
     pdf.ln(1)
 
     # ÜRÜN 1
-    set_ft('B', 10)
-    pdf.multi_cell(0, 5, tr(f"1) {s.get('Ürün 1')} ({s.get('Adet 1')} Adet)"))
+    set_ft('B', 8)
+    pdf.multi_cell(0, 4, tr(f"1) {s.get('Ürün 1')} ({s.get('Adet 1')} Adet)"))
     if s.get('İsim 1'):
-        set_ft('I', 9)
+        set_ft('I', 8)
         pdf.set_text_color(0, 102, 204)
-        pdf.set_x(10)
-        pdf.multi_cell(0, 5, tr(f">>> YAZILACAK İSİM: {s.get('İsim 1')} <<<"))
+        pdf.set_x(5)
+        pdf.multi_cell(0, 4, tr(f">>> YAZILACAK İSİM: {s.get('İsim 1')} <<<"))
         pdf.set_text_color(0, 0, 0)
 
     # ÜRÜN 2
     if s.get('Ürün 2'):
-        pdf.ln(1)
-        set_ft('B', 10)
-        pdf.multi_cell(0, 5, tr(f"2) {s.get('Ürün 2')} ({s.get('Adet 2')} Adet)"))
+        set_ft('B', 8)
+        pdf.multi_cell(0, 4, tr(f"2) {s.get('Ürün 2')} ({s.get('Adet 2')} Adet)"))
         if s.get('İsim 2'):
-            set_ft('I', 9)
+            set_ft('I', 8)
             pdf.set_text_color(0, 102, 204)
-            pdf.set_x(10)
-            pdf.multi_cell(0, 5, tr(f">>> YAZILACAK İSİM: {s.get('İsim 2')} <<<"))
+            pdf.set_x(5)
+            pdf.multi_cell(0, 4, tr(f">>> YAZILACAK İSİM: {s.get('İsim 2')} <<<"))
             pdf.set_text_color(0, 0, 0)
 
-    pdf.ln(2)
-    set_ft('', 10)
+    pdf.ln(1)
+    set_ft('', 8)
 
+    # --- ÖDEME BİLGİSİ ---
     odeme_turu = str(s.get('Ödeme', '')).upper()
-    
-    # Store current Y to draw rect correctly
     y_start = pdf.get_y()
+    
     if "KAPIDA" in odeme_turu:
         pdf.set_fill_color(255, 230, 100)
-        pdf.rect(5, y_start, 90, 14, 'F')
-        pdf.set_xy(6, y_start + 1)
-        pdf.cell(0, 5, tr(f"ÖDEME TÜRÜ: {odeme_turu}"), ln=1)
+        pdf.rect(3, y_start, 94, 10, 'F') # Yüksekliği daraltıldı
+        pdf.set_xy(4, y_start + 1)
+        pdf.cell(0, 4, tr(f"ÖDEME: {odeme_turu}"), ln=1)
         pdf.set_text_color(200, 0, 0)
-        set_ft('B', 11)
-        pdf.cell(0, 6, tr(f"TAHSİL EDİLECEK TUTAR: {s.get('Tutar')} TL"), ln=1)
+        set_ft('B', 10)
+        pdf.cell(0, 5, tr(f"TAHSİL EDİLECEK TUTAR: {s.get('Tutar')} TL"), ln=1)
         pdf.set_text_color(0, 0, 0)
-        set_ft('', 9)
+        set_ft('', 8)
     else:
-        # Ödemesi alınmış durumlarda yeşil arka plan ve mesaj
         pdf.set_fill_color(200, 240, 200)
-        pdf.rect(5, y_start, 90, 14, 'F')
-        pdf.set_xy(6, y_start + 1)
-        pdf.cell(0, 5, tr(f"ÖDEME TÜRÜ: {odeme_turu} | Tutar: {s.get('Tutar')} TL"), ln=1)
+        pdf.rect(3, y_start, 94, 10, 'F')
+        pdf.set_xy(4, y_start + 1)
+        pdf.cell(0, 4, tr(f"ÖDEME: {odeme_turu} | Tutar: {s.get('Tutar')} TL"), ln=1)
         pdf.set_text_color(0, 128, 0)
-        set_ft('B', 11)
-        pdf.cell(0, 6, tr("ÖDEMESİ ALINDI - TAHSİLAT YOK"), ln=1)
+        set_ft('B', 10)
+        pdf.cell(0, 5, tr("ÖDEMESİ ALINDI - TAHSİLAT YOK"), ln=1)
         pdf.set_text_color(0, 0, 0)
-        set_ft('', 9)
+        set_ft('', 8)
         
-    pdf.set_y(y_start + 16)
+    pdf.set_y(y_start + 12)
 
+    # --- MÜŞTERİ BİLGİLERİ ---
     pdf.set_fill_color(240, 240, 240)
-    pdf.cell(0, 6, tr("  MÜŞTERİ BİLGİLERİ"), ln=1, fill=True)
+    pdf.cell(0, 4, tr("  MÜŞTERİ BİLGİLERİ"), ln=1, fill=True)
     pdf.ln(1)
     
-    set_ft('B', 9)
-    pdf.multi_cell(0, 4, tr(f"Müşteri: {s.get('Müşteri')}"))
-    set_ft('', 9)
-    pdf.multi_cell(0, 4, tr(f"Telefon: {s.get('Telefon')}"))
+    set_ft('B', 8)
+    # İsim ve telefon satır tasarrufu için yan yana alındı
+    pdf.multi_cell(0, 3, tr(f"Müşteri: {s.get('Müşteri')} - Tel: {s.get('Telefon')}"))
+    set_ft('', 8)
 
-    # İl ve İlçe kontrolü
     il = str(s.get('İl', '')).strip()
     ilce = str(s.get('İlçe', '')).strip()
     adres_metni = s.get('Adres', '')
 
     if il and ilce:
-        adres_metni = f"{adres_metni}\n{ilce.upper()} / {il.upper()}"
+        adres_metni = f"{adres_metni} - {ilce.upper()} / {il.upper()}"
 
-    pdf.multi_cell(0, 4, tr(f"Adres: {adres_metni}"))
+    pdf.multi_cell(0, 3, tr(f"Adres: {adres_metni}"))
+    
     if s.get('Not'):
         pdf.ln(1)
-        set_ft('B', 9)
+        set_ft('B', 8)
         pdf.set_text_color(200, 0, 0)
-        pdf.multi_cell(0, 4, tr(f"MÜŞTERİ NOTU: {s.get('Not')}"))
+        pdf.multi_cell(0, 3, tr(f"NOT: {s.get('Not')}"))
         pdf.set_text_color(0, 0, 0)
-        set_ft('', 9)
-
-    return pdf.output(dest='S').encode('latin-1')
-
-
-
-def create_pazaryeri_bulk_pdf(siparisler, urun_dict):
-    pdf = FPDF(format=(100, 130))
-    pdf.set_auto_page_break(auto=True, margin=5)
-    
-    try:
-        pdf.add_font('ArialTR', '', 'arial.ttf', uni=True)
-        pdf.add_font('ArialTR', 'B', 'arial.ttf', uni=True)
-        pdf.add_font('ArialTR', 'I', 'arial.ttf', uni=True)
-    except Exception as e:
-        print("Font yuklenemedi (bulk):", e)
-        pass
-
-    def tr(t):
-        if not t: return ""
-        if 'arialtr' in pdf.fonts: return str(t)
-        return str(t).replace("ğ","g").replace("Ğ","G").replace("ş","s").replace("Ş","S").replace("İ","I").replace("ı","i").encode('latin-1','replace').decode('latin-1')
-
-    def set_ft(style='', size=10):
-        if 'arialtr' in pdf.fonts: pdf.set_font('ArialTR', style, size)
-        else: pdf.set_font('Arial', style, size)
-
-    import tempfile
-    import os
-    import requests
-
-    for s in siparisler:
-        pdf.add_page()
-        
-        # Header
-        pdf.set_fill_color(40, 40, 40)
-        pdf.rect(0, 0, 100, 15, 'F')
-        pdf.set_text_color(255, 255, 255)
-        set_ft('B', 12)
-        pdf.text(5, 10, "AHSAP HOBI DUNYASI - PAZARYERI KART")
-        
-        pdf.set_font_size(8)
-        pdf.set_text_color(200, 200, 200)
-        pdf.text(60, 10, f"Tarih: {s.get('Tarih', '')}")
-        pdf.set_text_color(0, 0, 0)
-        
-        kargo_takip = str(s.get('Kargo Takip No', '')).strip()
-        if 'E' in kargo_takip.upper():
-            try:
-                val = float(kargo_takip.upper().replace(',', '.'))
-                kargo_takip = f"{val:.0f}"
-            except: pass
-        kargo_takip = ''.join(c for c in kargo_takip if c.isalnum())
-
-        pazaryeri_sip_no = str(s.get('Pazaryeri Siparis No', s.get('Siparis No', ''))).strip()
-        if 'E' in pazaryeri_sip_no.upper():
-            try: pazaryeri_sip_no = str(int(float(pazaryeri_sip_no.upper().replace(',', '.'))))
-            except: pass
-
-        pdf.set_y(18)
-        set_ft('B', 10)
-        pdf.cell(0, 5, tr("Sipariş No: " + pazaryeri_sip_no), ln=1)
-
-        pdf.ln(2)
-
-        # Musteri
-        pdf.set_fill_color(240, 240, 240)
-        set_ft('', 9)
-        pdf.cell(0, 5, tr("  MÜŞTERİ BİLGİLERİ"), ln=1, fill=True)
-        pdf.ln(1)
-        
-        set_ft('B', 9)
-        pdf.multi_cell(0, 4, tr(f"Müşteri: {s.get('Müşteri', '')}"))
-        set_ft('', 9)
-        pdf.multi_cell(0, 4, tr(f"Telefon: {s.get('Telefon', '')}"))
-
-        il = str(s.get('İl', '')).strip()
-        ilce = str(s.get('İlçe', '')).strip()
-        adres_metni = str(s.get('Adres', '')).strip()
-        if il and ilce:
-            adres_metni = f"{adres_metni}\n{ilce.upper()} / {il.upper()}"
-
-        pdf.multi_cell(0, 4, tr(f"Adres: {adres_metni}"))
-        
-        pdf.ln(3)
-
-        # Urunler
-        pdf.set_fill_color(240, 240, 240)
-        set_ft('', 9)
-        pdf.cell(0, 5, tr("  ÜRÜN DETAYLARI"), ln=1, fill=True)
-        pdf.ln(1)
-
-        set_ft('B', 9)
-        pdf.multi_cell(0, 4, tr(f"1) {s.get('Ürün 1', '')} ({s.get('Adet 1', '')} Adet)"))
-        if s.get('Ürün 2'):
-            pdf.ln(1)
-            pdf.multi_cell(0, 4, tr(f"2) {s.get('Ürün 2', '')} ({s.get('Adet 2', '')} Adet)"))
-
-        # Barcode
-        if kargo_takip:
-            pdf.ln(10)
-            set_ft('', 9)
-            pdf.cell(0, 4, tr(f"Kargo Takip No: {kargo_takip}"), ln=1, align='C')
-            pdf.ln(2)
-
-            try:
-                api_url = f"https://bwipjs-api.metafloor.com/?bcid=code128&text={kargo_takip}&scale=3&height=12&includetext=false"
-                response = requests.get(api_url, timeout=5)
-                
-                if response.status_code == 200:
-                    fd, tmp_name = tempfile.mkstemp(suffix=".png")
-                    os.close(fd)
-                    with open(tmp_name, 'wb') as f:
-                        f.write(response.content)
-                        
-                    barkod_w = 80
-                    barkod_h = 15
-                    x_pos = (100 - barkod_w) / 2
-                    
-                    pdf.image(tmp_name, x=x_pos, y=pdf.get_y(), w=barkod_w, h=barkod_h)
-                    pdf.set_y(pdf.get_y() + barkod_h + 5)
-                    try: os.remove(tmp_name)
-                    except: pass
-                else:
-                    pdf.code39(kargo_takip, x=10, y=pdf.get_y(), w=1.5, h=15)
-                    pdf.set_y(pdf.get_y() + 20)
-            except Exception as e:
-                print("Barkod olusturulamadi (bulk):", e)
-                try:
-                    pdf.code39(kargo_takip, x=10, y=pdf.get_y(), w=1.5, h=15)
-                    pdf.set_y(pdf.get_y() + 20)
-                except: pass
+        set_ft('', 8)
 
     return pdf.output(dest='S').encode('latin-1')
 
