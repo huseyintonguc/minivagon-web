@@ -15,7 +15,7 @@ import json
 import re
 
 # --- SAYFA AYARLARI ---
-st.set_page_config(page_title="MiniVagon Bulut", page_icon="☁️", layout="wide")
+st.set_page_config(page_title="Ahşap Hobi Dünyası", page_icon="☁️", layout="wide")
 
 # --- SABİTLER ---
 SHEET_ADI = "MiniVagonDB"
@@ -32,7 +32,7 @@ def check_login():
     correct_username = auth_secrets.get("username", secrets.token_hex(16))
     correct_password = auth_secrets.get("password", secrets.token_hex(16))
     
-    st.markdown("<h2 style='text-align: center; color: #4A90E2;'>MiniVagon Bulut Girişi</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center; color: #4A90E2;'>Ahşap Hobi Dünyası Girişi</h2>", unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
@@ -978,7 +978,7 @@ def get_maliyet_dict():
 
 # --- PDF OLUŞTURMA ---
 def create_pdf(s, urun_dict):
-    pdf = FPDF(format=(100, 150))
+    pdf = FPDF(format=(100, 130))
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=5)
     
@@ -999,7 +999,7 @@ def create_pdf(s, urun_dict):
     
     pdf.set_text_color(255, 255, 255)
     pdf.set_font_size(14)
-    pdf.text(5, 13, "MINIVAGON")
+    pdf.text(5, 13, "AHSAP HOBI DUNYASI")
     
     pdf.set_font_size(8)
     pdf.set_text_color(200, 200, 200)
@@ -1129,7 +1129,7 @@ def create_pdf(s, urun_dict):
 
 
 def create_pazaryeri_bulk_pdf(siparisler, urun_dict):
-    pdf = FPDF(format=(100, 150))
+    pdf = FPDF(format=(100, 130))
     pdf.set_auto_page_break(auto=True, margin=5)
     
     try:
@@ -1161,7 +1161,7 @@ def create_pazaryeri_bulk_pdf(siparisler, urun_dict):
         pdf.rect(0, 0, 100, 15, 'F')
         pdf.set_text_color(255, 255, 255)
         set_ft('B', 12)
-        pdf.text(5, 10, "MINIVAGON - PAZARYERI KART")
+        pdf.text(5, 10, "AHSAP HOBI DUNYASI - PAZARYERI KART")
         
         pdf.set_font_size(8)
         pdf.set_text_color(200, 200, 200)
@@ -1258,7 +1258,7 @@ def create_pazaryeri_bulk_pdf(siparisler, urun_dict):
     return pdf.output(dest='S').encode('latin-1')
 
 def create_pazaryeri_pdf(s, urun_dict):
-    pdf = FPDF(format=(100, 150))
+    pdf = FPDF(format=(100, 130))
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=5)
     
@@ -1285,7 +1285,7 @@ def create_pazaryeri_pdf(s, urun_dict):
     pdf.rect(0, 0, 100, 15, 'F')
     pdf.set_text_color(255, 255, 255)
     set_ft('B', 12)
-    pdf.text(5, 10, "MINIVAGON - PAZARYERI KART")
+    pdf.text(5, 10, "AHSAP HOBI DUNYASI - PAZARYERI KART")
     
     pdf.set_font_size(8)
     pdf.set_text_color(200, 200, 200)
