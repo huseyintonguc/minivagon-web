@@ -1123,7 +1123,7 @@ def create_pdf(s, urun_dict):
     return pdf.output(dest='S').encode('latin-1')
 
 def create_pazaryeri_pdf(s, urun_dict):
-    pdf = FPDF(format=(100, 128))
+    pdf = FPDF(format=(98, 128))
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=2) # Alt marj daraltıldı
     
