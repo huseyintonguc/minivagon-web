@@ -724,7 +724,7 @@ def create_pdf(s, urun_dict):
     pdf.ln(1)
     
     # --- RESİMLER ---
-    img_y = pdf.get_y()
+    img_y = pdf.get_y() + 2
     def resim_koy(u_adi, x_pos):
         if u_adi in urun_dict:
             dosya_adi = urun_dict[u_adi]
@@ -746,7 +746,7 @@ def create_pdf(s, urun_dict):
         resim_koy(s.get('Ürün 1'), 38)
 
     # Resimlerin bittiği koordinata dinamik olarak in
-    pdf.set_y(img_y + 25) 
+    pdf.set_y(img_y + 38) 
     pdf.set_text_color(0, 0, 0)
 
     # --- ÜRÜN DETAYLARI ---
