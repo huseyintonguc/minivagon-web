@@ -1011,7 +1011,7 @@ def create_pdf(s, urun_dict):
     pdf.text(60, 6, f"Siparis No: #{s.get('Siparis No')}")
     pdf.text(60, 11, f"Tarih: {s.get('Tarih')}")
     
-    # --- RESİMLER (Küçültüldü ve hizalandı) ---
+    # --- RESİMLER ---
     def resim_koy(u_adi, x_pos):
         if u_adi in urun_dict:
             dosya_adi = urun_dict[u_adi]
@@ -1020,21 +1020,21 @@ def create_pdf(s, urun_dict):
                 try:
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
                         img = Image.open(full_path).convert('RGB')
-                        img.thumbnail((200, 200)) # Thumbnail boyutu düşürüldü
+                        img.thumbnail((200, 200))
                         img.save(tmp.name)
-                        # Genişlik 40'tan 28'e düşürüldü, Y ekseninde daha yukarı alındı
-                        pdf.image(tmp.name, x=x_pos, y=16, w=28) 
+                        # Genişlik (w) 25'e düşürüldü
+                        pdf.image(tmp.name, x=x_pos, y=16, w=25) 
                 except Exception as e:
                     print("Resim hatasi:", e)
 
     if s.get('Ürün 2'): 
-        resim_koy(s.get('Ürün 1'), 15)
-        resim_koy(s.get('Ürün 2'), 55)
+        resim_koy(s.get('Ürün 1'), 18)
+        resim_koy(s.get('Ürün 2'), 57)
     else: 
-        resim_koy(s.get('Ürün 1'), 36)
+        resim_koy(s.get('Ürün 1'), 37.5)
 
-    # Resimlerin bittiği yerin hemen altından metne başla (eski kodda bu 65'ti ve üst üste biniyordu)
-    pdf.set_y(46) 
+    # Metnin başlama koordinatı aşağı çekilerek resimle örtüşmesi engellendi
+    pdf.set_y(56) 
     pdf.set_text_color(0, 0, 0)
 
     # --- ÜRÜN DETAYLARI ---
@@ -1064,7 +1064,7 @@ def create_pdf(s, urun_dict):
             pdf.multi_cell(0, 4, tr(f">>> YAZILACAK İSİM: {s.get('İsim 2')} <<<"))
             pdf.set_text_color(0, 0, 0)
 
-    pdf.ln(1)
+    pdf.ln(2)
     set_ft('', 8)
 
     # --- ÖDEME BİLGİSİ ---
@@ -1073,7 +1073,7 @@ def create_pdf(s, urun_dict):
     
     if "KAPIDA" in odeme_turu:
         pdf.set_fill_color(255, 230, 100)
-        pdf.rect(3, y_start, 94, 10, 'F') # Yüksekliği daraltıldı
+        pdf.rect(3, y_start, 94, 10, 'F')
         pdf.set_xy(4, y_start + 1)
         pdf.cell(0, 4, tr(f"ÖDEME: {odeme_turu}"), ln=1)
         pdf.set_text_color(200, 0, 0)
@@ -1100,7 +1100,6 @@ def create_pdf(s, urun_dict):
     pdf.ln(1)
     
     set_ft('B', 8)
-    # İsim ve telefon satır tasarrufu için yan yana alındı
     pdf.multi_cell(0, 3, tr(f"Müşteri: {s.get('Müşteri')} - Tel: {s.get('Telefon')}"))
     set_ft('', 8)
 
