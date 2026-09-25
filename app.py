@@ -195,6 +195,74 @@ def create_efatura_payload(siparis, user_id=None, company_id=None):
         })
 
     return payload
+    import xml.etree.ElementTree as ET
+
+def yurtici_kargo_gonderi_olustur(siparis):
+    """Sipariş verilerini Yurtiçi Kargo SOAP API'sine gönderir ve kargo takip no (jobId) döner."""
+    try:
+        if "yurtici" not in st.secrets:
+            return None, "st.secrets içinde [yurtici] ayarı bulunamadı."
+            
+        y_secrets = st.secrets["yurtici"]
+        username = y_secrets.get("username")
+        password = y_secrets.get("password")
+        
+        tel = str(siparis.get('Telefon', '')).strip()
+        tel = ''.join(c for c in tel if c.isdigit())
+        if not tel: tel = "05555555555"
+
+        il = str(siparis.get('İl', 'İstanbul')).strip()
+        ilce = str(siparis.get('İlçe', 'Merkez')).strip()
+        adres = str(siparis.get('Adres', 'Adres Belirtilmemiş')).strip()
+        musteri = str(siparis.get('Müşteri', 'Müşteri')).strip()
+        sip_no = str(siparis.get('Siparis No', ''))
+
+        # Gönderici ödemeli (payorTypeCode: 1) standart kargo şablonu
+        xml_payload = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ship="http://shippingorderdispatcher.services.yurticikargo.com">
+           <soapenv:Header/>
+           <soapenv:Body>
+              <ship:createShipment>
+                 <wsUserName>{username}</wsUserName>
+                 <wsPassword>{password}</wsPassword>
+                 <userLanguage>TR</userLanguage>
+                 <ShippingOrderVO>
+                    <cargoKey>{sip_no}</cargoKey>
+                    <invoiceKey>{sip_no}</invoiceKey>
+                    <receiverCustName>{musteri}</receiverCustName>
+                    <receiverAddress>{adres}</receiverAddress>
+                    <cityName>{il}</cityName>
+                    <townName>{ilce}</townName>
+                    <receiverPhone1>{tel}</receiverPhone1>
+                    <payorTypeCode>1</payorTypeCode>
+                    <cargoCount>1</cargoCount>
+                 </ShippingOrderVO>
+              </ship:createShipment>
+           </soapenv:Body>
+        </soapenv:Envelope>"""
+
+        url = "http://ws.yurticikargo.com/KOPSWebServices/ShippingOrderDispatcherServices"
+        headers = {'Content-Type': 'text/xml; charset=utf-8'}
+        
+        response = requests.post(url, data=xml_payload.encode('utf-8'), headers=headers)
+        
+        if response.status_code == 200:
+            root = ET.fromstring(response.text)
+            # Namespace bağımsız element arama
+            out_flag = root.find('.//outFlag')
+            out_result = root.find('.//outResult')
+            job_id = root.find('.//jobId')
+            
+            if out_flag is not None and out_flag.text == "0":
+                takip_no = job_id.text if job_id is not None else sip_no
+                return takip_no, "BAŞARILI"
+            else:
+                hata = out_result.text if out_result is not None else "Bilinmeyen Hata"
+                return None, f"Yurtiçi Kargo Hatası: {hata}"
+        else:
+            return None, f"Bağlantı Hatası: HTTP {response.status_code}"
+            
+    except Exception as e:
+        return None, f"Sistem Hatası: {str(e)}"
 
 # --- TRENDYOL API BAĞLANTISI ---
 def fetch_trendyol_orders(start_date_ms=None, end_date_ms=None, status=None):
