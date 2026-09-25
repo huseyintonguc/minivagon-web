@@ -13,6 +13,7 @@ import requests
 import base64
 import json
 import re
+import xml.etree.ElementTree as ET
 
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="Ahşap Hobi Dünyası", page_icon="☁️", layout="wide")
@@ -62,6 +63,79 @@ if st.sidebar.button("🚪 Çıkış Yap"):
 def simdi():
     tz = pytz.timezone('Europe/Istanbul')
     return datetime.now(tz)
+
+# --- YURTİÇİ KARGO API BAĞLANTISI ---
+def yurtici_kargo_gonderi_olustur(siparis):
+    """Sipariş verilerini Yurtiçi Kargo SOAP API'sine gönderir ve kargo takip no (jobId) döner."""
+    try:
+        if "yurtici" not in st.secrets:
+            return None, "st.secrets içinde [yurtici] ayarı bulunamadı."
+            
+        y_secrets = st.secrets["yurtici"]
+        username = y_secrets.get("username")
+        password = y_secrets.get("password")
+        
+        tel = str(siparis.get('Telefon', '')).strip()
+        tel = ''.join(c for c in tel if c.isdigit())
+        if not tel: tel = "05555555555"
+
+        il = str(siparis.get('İl', 'İstanbul')).strip()
+        ilce = str(siparis.get('İlçe', 'Merkez')).strip()
+        adres = str(siparis.get('Adres', 'Adres Belirtilmemiş')).strip()
+        musteri = str(siparis.get('Müşteri', 'Müşteri')).strip()
+        sip_no = str(siparis.get('Siparis No', ''))
+
+        # Ödeme tipi kontrolü (Kapıda ödeme mi?)
+        odeme = str(siparis.get('Ödeme', '')).upper()
+        tt_amount = siparis.get('Tutar', 0) if "KAPIDA" in odeme else 0
+        tt_document_id = sip_no if "KAPIDA" in odeme else ""
+
+        xml_payload = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ship="http://shippingorderdispatcher.services.yurticikargo.com">
+           <soapenv:Header/>
+           <soapenv:Body>
+              <ship:createShipment>
+                 <wsUserName>{username}</wsUserName>
+                 <wsPassword>{password}</wsPassword>
+                 <userLanguage>TR</userLanguage>
+                 <ShippingOrderVO>
+                    <cargoKey>{sip_no}</cargoKey>
+                    <invoiceKey>{sip_no}</invoiceKey>
+                    <receiverCustName>{musteri}</receiverCustName>
+                    <receiverAddress>{adres}</receiverAddress>
+                    <cityName>{il}</cityName>
+                    <townName>{ilce}</townName>
+                    <receiverPhone1>{tel}</receiverPhone1>
+                    <payorTypeCode>1</payorTypeCode>
+                    <cargoCount>1</cargoCount>
+                    <ttInvoiceAmount>{tt_amount}</ttInvoiceAmount>
+                    <ttDocumentId>{tt_document_id}</ttDocumentId>
+                 </ShippingOrderVO>
+              </ship:createShipment>
+           </soapenv:Body>
+        </soapenv:Envelope>"""
+
+        url = "http://ws.yurticikargo.com/KOPSWebServices/ShippingOrderDispatcherServices"
+        headers = {'Content-Type': 'text/xml; charset=utf-8'}
+        
+        response = requests.post(url, data=xml_payload.encode('utf-8'), headers=headers)
+        
+        if response.status_code == 200:
+            root = ET.fromstring(response.text)
+            out_flag = root.find('.//outFlag')
+            out_result = root.find('.//outResult')
+            job_id = root.find('.//jobId')
+            
+            if out_flag is not None and out_flag.text == "0":
+                takip_no = job_id.text if job_id is not None else sip_no
+                return takip_no, "BAŞARILI"
+            else:
+                hata = out_result.text if out_result is not None else "Bilinmeyen Hata"
+                return None, f"Yurtiçi Kargo Hatası: {hata}"
+        else:
+            return None, f"Bağlantı Hatası: HTTP {response.status_code}"
+            
+    except Exception as e:
+        return None, f"Sistem Hatası: {str(e)}"
 
 # --- TRENDYOL E-FATURA API BAĞLANTISI ---
 def trendyol_efatura_login():
@@ -195,74 +269,6 @@ def create_efatura_payload(siparis, user_id=None, company_id=None):
         })
 
     return payload
-    import xml.etree.ElementTree as ET
-
-def yurtici_kargo_gonderi_olustur(siparis):
-    """Sipariş verilerini Yurtiçi Kargo SOAP API'sine gönderir ve kargo takip no (jobId) döner."""
-    try:
-        if "yurtici" not in st.secrets:
-            return None, "st.secrets içinde [yurtici] ayarı bulunamadı."
-            
-        y_secrets = st.secrets["yurtici"]
-        username = y_secrets.get("username")
-        password = y_secrets.get("password")
-        
-        tel = str(siparis.get('Telefon', '')).strip()
-        tel = ''.join(c for c in tel if c.isdigit())
-        if not tel: tel = "05555555555"
-
-        il = str(siparis.get('İl', 'İstanbul')).strip()
-        ilce = str(siparis.get('İlçe', 'Merkez')).strip()
-        adres = str(siparis.get('Adres', 'Adres Belirtilmemiş')).strip()
-        musteri = str(siparis.get('Müşteri', 'Müşteri')).strip()
-        sip_no = str(siparis.get('Siparis No', ''))
-
-        # Gönderici ödemeli (payorTypeCode: 1) standart kargo şablonu
-        xml_payload = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ship="http://shippingorderdispatcher.services.yurticikargo.com">
-           <soapenv:Header/>
-           <soapenv:Body>
-              <ship:createShipment>
-                 <wsUserName>{username}</wsUserName>
-                 <wsPassword>{password}</wsPassword>
-                 <userLanguage>TR</userLanguage>
-                 <ShippingOrderVO>
-                    <cargoKey>{sip_no}</cargoKey>
-                    <invoiceKey>{sip_no}</invoiceKey>
-                    <receiverCustName>{musteri}</receiverCustName>
-                    <receiverAddress>{adres}</receiverAddress>
-                    <cityName>{il}</cityName>
-                    <townName>{ilce}</townName>
-                    <receiverPhone1>{tel}</receiverPhone1>
-                    <payorTypeCode>1</payorTypeCode>
-                    <cargoCount>1</cargoCount>
-                 </ShippingOrderVO>
-              </ship:createShipment>
-           </soapenv:Body>
-        </soapenv:Envelope>"""
-
-        url = "http://ws.yurticikargo.com/KOPSWebServices/ShippingOrderDispatcherServices"
-        headers = {'Content-Type': 'text/xml; charset=utf-8'}
-        
-        response = requests.post(url, data=xml_payload.encode('utf-8'), headers=headers)
-        
-        if response.status_code == 200:
-            root = ET.fromstring(response.text)
-            # Namespace bağımsız element arama
-            out_flag = root.find('.//outFlag')
-            out_result = root.find('.//outResult')
-            job_id = root.find('.//jobId')
-            
-            if out_flag is not None and out_flag.text == "0":
-                takip_no = job_id.text if job_id is not None else sip_no
-                return takip_no, "BAŞARILI"
-            else:
-                hata = out_result.text if out_result is not None else "Bilinmeyen Hata"
-                return None, f"Yurtiçi Kargo Hatası: {hata}"
-        else:
-            return None, f"Bağlantı Hatası: HTTP {response.status_code}"
-            
-    except Exception as e:
-        return None, f"Sistem Hatası: {str(e)}"
 
 # --- TRENDYOL API BAĞLANTISI ---
 def fetch_trendyol_orders(start_date_ms=None, end_date_ms=None, status=None):
@@ -895,6 +901,50 @@ def create_pdf(s, urun_dict):
         pdf.multi_cell(0, 3.5, tr(f"NOT: {s.get('Not')}"))
         pdf.set_text_color(0, 0, 0)
         set_ft('', 8)
+        
+    # --- BARKOD BİLGİSİ (Yurtiçi veya Manuel için eklendi) ---
+    kargo_takip = str(s.get('Kargo Takip No', '')).strip()
+    if 'E' in kargo_takip.upper():
+        try:
+            val = float(kargo_takip.upper().replace(',', '.'))
+            kargo_takip = f"{val:.0f}"
+        except: pass
+    kargo_takip = ''.join(c for c in kargo_takip if c.isalnum())
+
+    if kargo_takip:
+        pdf.ln(2)
+        set_ft('', 8)
+        pdf.cell(0, 3, tr(f"Kargo Takip No: {kargo_takip}"), ln=1, align='C')
+        pdf.ln(1)
+
+        try:
+            import requests
+            api_url = f"https://bwipjs-api.metafloor.com/?bcid=code128&text={kargo_takip}&scale=3&height=8&includetext=false"
+            response = requests.get(api_url, timeout=5)
+            
+            if response.status_code == 200:
+                fd, tmp_name = tempfile.mkstemp(suffix=".png")
+                os.close(fd)
+                with open(tmp_name, 'wb') as f:
+                    f.write(response.content)
+                    
+                barkod_w = 60 
+                barkod_h = 10 
+                x_pos = (100 - barkod_w) / 2
+                
+                pdf.image(tmp_name, x=x_pos, y=pdf.get_y(), w=barkod_w, h=barkod_h)
+                pdf.set_y(pdf.get_y() + barkod_h + 2)
+                try: os.remove(tmp_name)
+                except: pass
+            else:
+                pdf.code39(kargo_takip, x=20, y=pdf.get_y(), w=1.0, h=10)
+                pdf.set_y(pdf.get_y() + 12)
+                
+        except Exception as e:
+            try:
+                pdf.code39(kargo_takip, x=20, y=pdf.get_y(), w=1.0, h=10)
+                pdf.set_y(pdf.get_y() + 12)
+            except: pass
 
     return pdf.output(dest='S').encode('latin-1')
 
@@ -1216,12 +1266,33 @@ elif menu == "📋 Sipariş Listesi":
 
             if 'Siparis No' in df.columns and not df.empty:
                 secenekler = df.apply(lambda x: f"{int(x['Siparis No'])} - {x['Müşteri']}", axis=1)
-                secilen = st.selectbox("Fiş Yazdır:", secenekler, key="manuel_fis")
-                if st.button("📄 FİŞ OLUŞTUR", key="btn_manuel_fis"):
-                    s_no = int(secilen.split(" - ")[0])
-                    sip = df[df['Siparis No'].astype(str) == str(s_no)].iloc[0].to_dict()
-                    pdf_data = create_pdf(sip, GUNCEL_URUNLER)
-                    st.download_button("📥 İNDİR", pdf_data, f"Siparis_{s_no}.pdf", "application/pdf", type="primary", key="dl_manuel_fis")
+                secilen = st.selectbox("Fiş Yazdır veya Kargo Barkodu Al:", secenekler, key="manuel_fis")
+                
+                col_m1, col_m2 = st.columns(2)
+                with col_m1:
+                    if st.button("📄 FİŞ OLUŞTUR (Standart)", key="btn_manuel_fis", use_container_width=True):
+                        s_no = int(secilen.split(" - ")[0])
+                        sip = df[df['Siparis No'].astype(str) == str(s_no)].iloc[0].to_dict()
+                        pdf_data = create_pdf(sip, GUNCEL_URUNLER)
+                        st.download_button("📥 İNDİR", pdf_data, f"Siparis_{s_no}.pdf", "application/pdf", type="primary", key="dl_manuel_fis")
+                
+                with col_m2:
+                    if st.button("🚚 YURTİÇİ BARKODU AL", key="btn_yurtici_fis", use_container_width=True):
+                        s_no = int(secilen.split(" - ")[0])
+                        sip = df[df['Siparis No'].astype(str) == str(s_no)].iloc[0].to_dict()
+                        
+                        with st.spinner("Yurtiçi Kargo sistemine iletiliyor..."):
+                            takip_no, msj = yurtici_kargo_gonderi_olustur(sip)
+                        
+                        if takip_no:
+                            st.success(f"Yurtiçi Kaydı Açıldı! Takip No: {takip_no}")
+                            sip['Kargo Takip No'] = takip_no
+                            sip['Kargo Firması'] = "YURTİÇİ KARGO"
+                            
+                            pdf_data = create_pdf(sip, GUNCEL_URUNLER)
+                            st.download_button("📥 BARKODLU ETİKETİ İNDİR", pdf_data, f"Yurtici_{s_no}.pdf", "application/pdf", type="primary", key="dl_yurtici_barkod")
+                        else:
+                            st.error(msj)
         else:
             st.info("Henüz manuel sipariş kaydı bulunmuyor.")
 
@@ -1406,13 +1477,34 @@ elif menu == "📋 Sipariş Listesi":
                 if 'Pazaryeri Siparis No' in df_pz.columns and not df_pz.empty:
                     secenekler_pz = df_pz.apply(lambda x: f"{x['Pazaryeri Siparis No']} - {x['Müşteri']}", axis=1)
                     secilen_pz = st.selectbox("Fiş Yazdır:", secenekler_pz, key="pz_fis")
-                    if st.button("📄 FİŞ OLUŞTUR", key="btn_pz_fis"):
-                        s_no_pz = secilen_pz.split(" - ")[0]
-                        sip_pz = df_pz[df_pz['Pazaryeri Siparis No'].astype(str) == str(s_no_pz)].iloc[0].to_dict()
-                        sip_pz['Siparis No'] = sip_pz.get('Pazaryeri Siparis No', '')
+                    
+                    col_p1, col_p2 = st.columns(2)
+                    with col_p1:
+                        if st.button("📄 FİŞ OLUŞTUR", key="btn_pz_fis", use_container_width=True):
+                            s_no_pz = secilen_pz.split(" - ")[0]
+                            sip_pz = df_pz[df_pz['Pazaryeri Siparis No'].astype(str) == str(s_no_pz)].iloc[0].to_dict()
+                            sip_pz['Siparis No'] = sip_pz.get('Pazaryeri Siparis No', '')
 
-                        pdf_data_pz = create_pazaryeri_pdf(sip_pz, GUNCEL_URUNLER)
-                        st.download_button("📥 İNDİR", pdf_data_pz, f"PazaryeriSiparis_{s_no_pz}.pdf", "application/pdf", type="primary", key="dl_pz_fis")
+                            pdf_data_pz = create_pazaryeri_pdf(sip_pz, GUNCEL_URUNLER)
+                            st.download_button("📥 İNDİR", pdf_data_pz, f"PazaryeriSiparis_{s_no_pz}.pdf", "application/pdf", type="primary", key="dl_pz_fis")
+                            
+                    with col_p2:
+                        if st.button("🚚 YURTİÇİ BARKODU AL", key="btn_pz_yurtici", use_container_width=True):
+                            s_no_pz = secilen_pz.split(" - ")[0]
+                            sip_pz = df_pz[df_pz['Pazaryeri Siparis No'].astype(str) == str(s_no_pz)].iloc[0].to_dict()
+                            sip_pz['Siparis No'] = sip_pz.get('Pazaryeri Siparis No', '')
+                            
+                            with st.spinner("Yurtiçi Kargo sistemine iletiliyor..."):
+                                takip_no, msj = yurtici_kargo_gonderi_olustur(sip_pz)
+                                
+                            if takip_no:
+                                st.success(f"Yurtiçi Kaydı Açıldı! Takip No: {takip_no}")
+                                sip_pz['Kargo Takip No'] = takip_no
+                                sip_pz['Kargo Firması'] = "YURTİÇİ KARGO"
+                                pdf_data_pz = create_pazaryeri_pdf(sip_pz, GUNCEL_URUNLER)
+                                st.download_button("📥 BARKODLU ETİKETİ İNDİR", pdf_data_pz, f"Yurtici_{s_no_pz}.pdf", "application/pdf", type="primary", key="dl_pz_yurtici")
+                            else:
+                                st.error(msj)
                     
                     if st.button("⚡ Trendyol E-Fatura Kes", type="secondary", key="btn_pz_efatura"):
                         with st.spinner("Trendyol E-Faturam API'sine bağlanılıyor..."):
